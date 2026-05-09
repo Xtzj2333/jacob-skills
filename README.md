@@ -2,6 +2,8 @@
 
 A Claude plugin marketplace bundling Jacob's research and manuscript-revision workflow skills, designed to be installed into both Claude Code and Claude Cowork from a single source.
 
+> **For Jacob's collaborators (Tony et al.):** Jacob put together a full setup guide just for you — see **[COLLABORATOR_SETUP.md](./COLLABORATOR_SETUP.md)**. It walks through installing these skills on both Claude Code and Cowork, configuring `USER_NAME` and the manuscript-push values for *your* repo (not Jacob's), enabling `/focus` mode, and the read-only source-of-truth boundary on Jacob's repo. Hand the file to your Claude Code session and say "follow this end-to-end." Suggestions for these skills are welcome via GitHub issues or PRs from a fork — please don't push directly to this repo.
+
 ## Skills
 
 | Plugin | What it does |
