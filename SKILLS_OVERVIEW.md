@@ -1,10 +1,11 @@
 # What each skill does
 
-Six skills, grouped by purpose:
+Seven skills, grouped by purpose:
 
 - **Citations** — `research-27` (produce), `citation-deepening` (verify content), `source-quality-check` (rate quality)
 - **Manuscript revision loop** — `commented-edit-roundtrip` (bridges margin comments and TODOs), `revision-queue` (state machine + audit log)
 - **Push utility** — `tony-github-push`
+- **Cowork-only personal-life utility** — `calendar-search` (Google Calendar lookup; Jacob-personalized — install on Cowork, not Claude Code)
 
 ---
 
@@ -18,6 +19,7 @@ Six skills, grouped by purpose:
 | 4 | commented-edit-roundtrip | "process my comments" / "drain the inbox" | Margin comments → TODOs (with audit trail) | one manuscript at a time |
 | 5 | revision-queue | "create a TODO" / "process these" / "close TODO N" | `<USER>_todos.md` + `completed_actions_log.md` | per project |
 | 6 | tony-github-push | "tony github push" / `/tony-github-push` | Push of configured dir to configured branch | one configured dir |
+| 7 | calendar-search | "is X on my calendar" / "do I have a Y" / "when is my Z" | Located event with calendar name + source-zone time | every calendar in your account |
 
 ---
 
@@ -237,6 +239,43 @@ The skill is named "tony-github-push" for historical reasons (it was originally 
 ### Why it's useful
 
 One command for a routine push, with the right `cd` / branch / staging done for you. The narrow scope (one configured directory only) is a safety property — the skill physically cannot push your entire workspace by accident.
+
+---
+
+## 7. calendar-search — multi-calendar Google Calendar lookup (Cowork-only)
+
+**Install scope.** Cowork only. Jacob does **not** install this on Claude Code — he doesn't want "what's on my calendar tomorrow" firing in coding sessions. If you also keep coding and personal-life surfaces separated, follow the same convention.
+
+**Trigger phrases.** "is X on my calendar", "do I have a Y", "when is my Z", "find my W", "search my calendar", "check my cal", "what time is".
+
+**Anti-trigger.** General to-do operations — those go to a separate to-do skill.
+
+**Input.** A natural-language question about an event. Optionally a date hint.
+
+**Output.** The located event with:
+
+- Which calendar it's on (so you learn where to look next time)
+- Date and time in the **event's source timezone** (the `timeZone` field — never silently converted)
+- Location, description, recurrence if relevant
+- A list of near-misses if no exact match was found
+
+**Key rules the skill enforces.**
+
+- **Never use the `fullText` query parameter.** It silently misses CJK titles and only searches one calendar. Filter in code on `summary` / `description` / `location`.
+- **Always `list_calendars()` first and iterate every calendar.** Most events live outside the default primary.
+- **Bilingual keyword expansion before scanning.** When you ask in English ("cactus"), also search the Chinese form (`仙人掌`); and vice versa.
+- **Chunked date windows for noisy calendars** (the ones holding hundreds of recurring entries). Default to 14-day chunks rather than betting on the recovery path.
+- **Preserve the event's source timezone** in the report. If an event is stored in `Asia/Tokyo`, that's the actual time at the venue — don't silently convert to local.
+
+**Built-in personalization.** The skill ships with Jacob's calendar list (Events, Meeting, Classes, Office Hours, Tasks, Optional, Really Important Tasks, Potentials Lab, SONA Schedule, FE 3, RAs Schedule, Holidays) and a keyword-to-calendar association table that lets it triage which calendar to look at first.
+
+**For Tony / non-Jacob users.** Replace the **Calendar reference** table near the bottom of the SKILL.md (the one starting with "Always re-fetch via `list_calendars`...") with your own calendar names. The keyword-to-calendar association table just above it is also Jacob-specific — replace those associations with what holds what in your calendar. Everything else (the universal rules above) carries over unchanged.
+
+**When to use.** Any time you're asking about an event you believe exists somewhere on your calendar. Especially when you have many calendars, bilingual titles, or recurring habits that overflow normal queries.
+
+**When NOT to use.** Creating new events (separate skill). Generic to-do operations. Anything not actually on a calendar (Gmail / Notes / phone reminders).
+
+**Why it's useful.** The naive "default calendar + `fullText`" query silently fails on CJK titles and on events that don't live in the default calendar. This skill encodes the working recipe: iterate every calendar, expand keywords across languages, chunk where needed, preserve timezones. Catches what the default lookup misses.
 
 ---
 

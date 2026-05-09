@@ -19,6 +19,7 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 | `commented-edit-roundtrip` | Round-trip editing via Word margin comments. Two modes: perpetual inbox (single .docx the user keeps commenting in forever) and one-shot rewrite (Claude returns the rewrite plus a comments-on-original audit copy). |
 | `revision-queue` | Multi-round revision state machine: two coordinated files (open todos + append-only changelog). Pairs with `commented-edit-roundtrip`. |
 | `tony-github-push` | Push manuscript edits to a configured remote/branch. Repo URL and branch are read from the user's CLAUDE.md or env, not hardcoded. |
+| `calendar-search` | Multi-calendar Google Calendar lookup with bilingual EN/ZH keyword expansion, chunked windows for noisy calendars, and source-timezone preservation. **Cowork-only** — Jacob does not install on Claude Code (avoids "what's on my calendar" firing in coding sessions). Skill is configured for Jacob's calendar set; fork and adapt the calendar-reference table for your own. |
 
 ## Install (Claude Code)
 
@@ -31,6 +32,8 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 /plugin install revision-queue@jacob-skills
 /plugin install tony-github-push@jacob-skills
 ```
+
+**Note for `calendar-search`:** install on Cowork only (`/plugin install calendar-search@jacob-skills` from Cowork). Skip on Claude Code unless you actually want calendar lookups firing in coding sessions.
 
 Then in `/plugin` → Marketplaces → `jacob-skills`, enable auto-update so future commits to this repo propagate on session start.
 

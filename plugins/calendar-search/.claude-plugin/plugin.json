@@ -1,0 +1,5 @@
+{
+  "name": "calendar-search",
+  "description": "Multi-calendar Google Calendar lookup with bilingual EN/ZH keyword expansion, chunked windows for noisy calendars, and source-timezone preservation. Originally configured for Jacob's calendar set — fork and adapt the calendar-reference table for your own.",
+  "author": { "name": "Jacob Zhang" }
+}
