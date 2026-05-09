@@ -4,6 +4,8 @@
 
 **How to use this document.** You can read it yourself and follow the steps manually, or paste this entire document into a Claude Code session and say "Follow this end-to-end and stop only at decision points marked **YOU DECIDE**."
 
+**Companion doc.** For a concise summary of what each skill actually *does* (what / how / when / why), see [SKILLS_OVERVIEW.md](./SKILLS_OVERVIEW.md) in this same repo. You can read it before or after this setup — they're independent.
+
 **Outcome by the end.**
 
 1. All 6 skills installed in your Claude Code (CLI).
