@@ -1,11 +1,13 @@
 # What each skill does
 
-Seven skills, grouped by purpose:
+Seven collaborator-facing skills, grouped by purpose:
 
 - **Citations** — `research-27` (produce), `citation-deepening` (verify content), `source-quality-check` (rate quality)
 - **Manuscript revision loop** — `commented-edit-roundtrip` (bridges margin comments and TODOs), `revision-queue` (state machine + audit log)
 - **Push utility** — `tony-github-push`
 - **Cowork-only personal-life utility** — `calendar-search` (Google Calendar lookup; Jacob-personalized — install on Cowork, not Claude Code)
+
+> An 8th plugin, `sync-cowork-skill`, is published in the marketplace but is Jacob-internal tooling (it publishes Cowork-side edits to this marketplace). Collaborators have no use for it; it is intentionally not described in this overview.
 
 ---
 
