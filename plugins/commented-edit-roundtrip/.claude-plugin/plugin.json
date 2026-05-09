@@ -1,0 +1,5 @@
+{
+  "name": "commented-edit-roundtrip",
+  "description": "Round-trip editing between Claude and the user using Word margin comments (perpetual-inbox + one-shot-rewrite modes).",
+  "author": { "name": "Jacob Zhang" }
+}

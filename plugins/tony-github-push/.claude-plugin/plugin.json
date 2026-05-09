@@ -1,0 +1,5 @@
+{
+  "name": "tony-github-push",
+  "description": "Push manuscript edits to a configured remote/branch (paths set via env or CLAUDE.md, not hardcoded).",
+  "author": { "name": "Jacob Zhang" }
+}

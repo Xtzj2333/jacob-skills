@@ -1,0 +1,5 @@
+{
+  "name": "revision-queue",
+  "description": "Two-file open-discussion + chronological-changelog system for multi-round revisions. Pairs with commented-edit-roundtrip.",
+  "author": { "name": "Jacob Zhang" }
+}

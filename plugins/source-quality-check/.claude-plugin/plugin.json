@@ -1,0 +1,5 @@
+{
+  "name": "source-quality-check",
+  "description": "Rates manuscript references on venue tier, peer-review status, recency, and author credibility.",
+  "author": { "name": "Jacob Zhang" }
+}

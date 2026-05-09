@@ -1,0 +1,37 @@
+{
+  "name": "jacob-skills",
+  "owner": { "name": "Jacob Zhang" },
+  "description": "Jacob's research and manuscript-revision workflow skills.",
+  "plugins": [
+    {
+      "name": "research-27",
+      "source": "./plugins/research-27",
+      "description": "Citation-rich literature-review brief generator with verify-and-loop verification."
+    },
+    {
+      "name": "citation-deepening",
+      "source": "./plugins/citation-deepening",
+      "description": "Pulls verbatim source quotes for fact-checking citations in a manuscript."
+    },
+    {
+      "name": "source-quality-check",
+      "source": "./plugins/source-quality-check",
+      "description": "Rates manuscript references on venue tier, peer-review status, recency, and author credibility."
+    },
+    {
+      "name": "commented-edit-roundtrip",
+      "source": "./plugins/commented-edit-roundtrip",
+      "description": "Round-trip editing between Claude and the user using Word margin comments (perpetual-inbox + one-shot-rewrite modes)."
+    },
+    {
+      "name": "revision-queue",
+      "source": "./plugins/revision-queue",
+      "description": "Two-file open-discussion + chronological-changelog system for multi-round revisions. Pairs with commented-edit-roundtrip."
+    },
+    {
+      "name": "tony-github-push",
+      "source": "./plugins/tony-github-push",
+      "description": "Push manuscript edits to a configured remote/branch (paths set via env or CLAUDE.md, not hardcoded)."
+    }
+  ]
+}

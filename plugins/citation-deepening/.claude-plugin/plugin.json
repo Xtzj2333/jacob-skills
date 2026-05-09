@@ -1,0 +1,5 @@
+{
+  "name": "citation-deepening",
+  "description": "Pulls verbatim source quotes for fact-checking citations in a manuscript.",
+  "author": { "name": "Jacob Zhang" }
+}
