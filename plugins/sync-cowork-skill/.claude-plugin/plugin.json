@@ -1,0 +1,5 @@
+{
+  "name": "sync-cowork-skill",
+  "description": "Copy a Cowork-side skill (the canonical, frequently-improved version) to the public marketplace plugin folder, with a mandatory diff + sensitive-content scan + explicit confirm gate. One-way sync only: Cowork is the source of truth; nothing is ever written back to Cowork.",
+  "author": { "name": "Jacob Zhang" }
+}

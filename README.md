@@ -20,6 +20,7 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 | `revision-queue` | Multi-round revision state machine: two coordinated files (open todos + append-only changelog). Pairs with `commented-edit-roundtrip`. |
 | `tony-github-push` | Push manuscript edits to a configured remote/branch. Repo URL and branch are read from the user's CLAUDE.md or env, not hardcoded. |
 | `calendar-search` | Multi-calendar Google Calendar lookup with bilingual EN/ZH keyword expansion, chunked windows for noisy calendars, and source-timezone preservation. **Cowork-only** — Jacob does not install on Claude Code (avoids "what's on my calendar" firing in coding sessions). Skill is configured for Jacob's calendar set; fork and adapt the calendar-reference table for your own. |
+| `sync-cowork-skill` | Publishes a Cowork-side skill to its marketplace plugin folder with a mandatory diff + sensitive-content scan + explicit confirm gate. Cowork remains the source of truth (read-only here); GitHub is downstream. **Jacob-specific** — hardcoded to `~/jacob-skills/` as the marketplace clone path. Run from Claude Code only. |
 
 ## Install (Claude Code)
 

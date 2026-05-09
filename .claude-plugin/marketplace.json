@@ -37,6 +37,11 @@
       "name": "calendar-search",
       "source": "./plugins/calendar-search",
       "description": "Multi-calendar Google Calendar lookup with bilingual EN/ZH keyword expansion, chunked windows for noisy calendars, and source-timezone preservation. Cowork-only (Jacob does not install on Claude Code). Configured for Jacob's calendar set — fork and adapt for yours."
+    },
+    {
+      "name": "sync-cowork-skill",
+      "source": "./plugins/sync-cowork-skill",
+      "description": "One-way publish of a Cowork-side skill to its marketplace plugin folder, with mandatory diff + sensitive-content scan + explicit confirm gate. Run from Claude Code only. Jacob-specific (assumes ~/jacob-skills/ as the marketplace clone)."
     }
   ]
 }
