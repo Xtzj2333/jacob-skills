@@ -1,0 +1,133 @@
+{
+  "snapshot_version": "0.1.0",
+  "owner": "jacob_main",
+  "generated_at": "2026-05-11T02:26:24Z",
+  "platform": "darwin",
+  "environment": {
+    "settings_json": {
+      "permissions": {
+        "allow": [
+          "Read(*)",
+          "Grep",
+          "Glob",
+          "WebFetch",
+          "WebSearch",
+          "Write(*)",
+          "Edit(*)"
+        ],
+        "defaultMode": "auto"
+      },
+      "hooks": {
+        "Notification": [
+          {
+            "matcher": "",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "osascript -e 'display notification \"Claude is waiting for input\" with title \"Claude Code\" sound name \"Glass\"'"
+              }
+            ]
+          }
+        ],
+        "PermissionRequest": [
+          {
+            "matcher": "",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "osascript -e 'display notification \"Action Required: Yes/No\" with title \"Claude Code Permission\" sound name \"Hero\"'"
+              }
+            ]
+          }
+        ]
+      },
+      "statusLine": {
+        "type": "command",
+        "command": "npx -y ccstatusline@latest"
+      },
+      "enabledPlugins": {
+        "superpowers@claude-plugins-official": true,
+        "research-27@jacob-skills": true,
+        "citation-deepening@jacob-skills": true,
+        "source-quality-check@jacob-skills": true,
+        "commented-edit-roundtrip@jacob-skills": true,
+        "revision-queue@jacob-skills": true,
+        "tony-github-push@jacob-skills": true,
+        "sync-cowork-skill@jacob-skills": true,
+        "claude-env-sync@jacob-skills": true
+      },
+      "extraKnownMarketplaces": {
+        "superpowers-marketplace": {
+          "source": {
+            "source": "github",
+            "repo": "obra/superpowers-marketplace"
+          }
+        },
+        "jacob-skills": {
+          "source": {
+            "source": "git",
+            "url": "https://github.com/Xtzj2333/jacob-skills.git"
+          }
+        }
+      },
+      "effortLevel": "xhigh",
+      "tui": "fullscreen",
+      "theme": "auto",
+      "remoteControlAtStartup": true,
+      "agentPushNotifEnabled": true,
+      "skipAutoPermissionPrompt": true
+    },
+    "mcp_servers": {},
+    "global_claude_md": "# Jacob's global Claude rules (cross-session)\n\nThese rules apply to **every** Claude Code session on this Mac, regardless of project. Project-specific rules live in each project's own `CLAUDE.md` and override these where they conflict.\n\nLast updated: 2026-05-08.\n\n---\n\n## 1. Read-in-rendered-form rule (presentation of files for Jacob's review)\n\nWhen Jacob needs to **review or sign off on a file's contents**, do not point him at the raw `.md`, `.tex`, `.bib`, `.json`, `.yaml`, or any other source format. He doesn't read those fluently mid-flow. Always render to a presentable form first:\n\n- **Markdown (`.md`)** → render to `.docx` (via pandoc) **and/or** `.pdf` (via pandoc + xelatex), and reference the rendered file in your message. Open it for him with `open`.\n- **LaTeX (`.tex`)** → compile to `.pdf` and reference the `.pdf`.\n- **Long structured data (JSON, YAML, CSV with many rows)** → summarize the relevant fields in a Markdown table inline in your reply, or render to a PDF table; don't dump raw.\n- **Short snippets (a few lines)** → quote them inline in a fenced code block in your reply; that's fine.\n\nTwo acceptable presentation formats: **PDF** (preferred for static read-through) and **rendered Word/HTML document** (preferred when Jacob will leave inline comments — e.g., a manuscript `.docx` he annotates with margin comments).\n\nFiles Claude edits behind the scenes (state files, logs) don't need to be rendered unless Jacob asks to see them. If unsure whether something needs rendering, render it.\n\n---\n\n## 2. `(source)` / `[source]` rule — read-only reference folders\n\nWhen Jacob marks a folder or file with `(source)` (parens, parallel to `(claude)`) or `[source]` (brackets), or when he asks Claude to label something as a source — that means:\n\n- **READ:** Always allowed. Read its contents freely; cite from it; quote it; build downstream analysis on it.\n- **EDIT / MODIFY / DELETE / RENAME / EXTRACT INTO IT:** **NOT ALLOWED** without explicit per-action permission.\n\nTo request permission, Claude must use the magic phrase **\"extract here\"** (regardless of what the action is — extracting a zip, adding a file, renaming, etc.). The phrase makes the request unambiguous so Jacob recognizes it as a source-folder permission ask and doesn't auto-grant by reflex.\n\n**Renaming is messy** (changes git history, breaks cross-references). If you encounter unmarked content that *should* be flagged as source, **don't rename the file/folder**. Instead, record its source-status in the project's `INDEX.md` (or `MAP.md`) — that's the canonical authoritative record of which items are sources.\n\nExamples:\n\n- `PNAS formatting official docs (source)/` → read PDFs freely; quote PNAS rules; do NOT extract zips or add files inside without an \"extract here\" approval.\n- `Bottom Up Wellbeing/data (source)/cleaned_responses.csv` → read freely for analysis; do NOT alter the file.\n- A markdown file Jacob says \"treat as source\" → record it in INDEX.md as source-flagged, even if the filename isn't suffixed.\n\n---\n\n## 3. INDEX.md / MAP.md required per project\n\nEvery project should have a navigation file at its root: either `INDEX.md` (file map) or `MAP.md` (broader orientation). If neither exists when Claude joins a project, **create one** during the first orientation session.\n\nThe file should at minimum cover:\n\n- The folder structure with one-line descriptions\n- Which folders/files are `(source)` or `(claude)` flagged\n- A Provenance section listing authorship for any non-obvious files\n- (For collaborative projects) which folders/files are local-only vs. shareable with collaborators / pushable to GitHub\n\nUpdate it when files move, get renamed, or change source-status.\n\n---\n\n## 4. `(claude)` suffix — flag AI-generated content awaiting review\n\nA `(claude)` suffix on a folder or file name means it was Claude-generated and has not yet been reviewed/approved item-by-item by the relevant human owner.\n\n- **Whole folder of Claude deliverables awaiting review** → suffix the folder: `lit_review (claude)/`. Files inside don't need their own suffix.\n- **Standalone Claude proposal file** → suffix it: `revision_plan (claude).md`.\n- **New manuscript versions** → use `_PROPOSED` suffix instead (e.g., `bottom_up_wellbeing_v6_PROPOSED.md`). Drop `_PROPOSED` only when the human owner signs off.\n- **DON'T suffix items inside an active Jacob/Claude exchange channel** — the channel encodes the convention.\n- **DON'T suffix mixed-authorship files** — record authorship in INDEX.md Provenance instead.\n- **DON'T suffix convention-mandated filenames** like `CLAUDE.md`, `README.md`, `INDEX.md`, `HANDOFF.md`, `MAP.md`. Their authorship goes in Provenance.\n\nRenames inside git-tracked folders need explicit OK before applying — they change git history.\n\n---\n\n## 5. Word counts and submission discipline\n\nDon't proactively police word counts during brainstorming or drafting. Only enforce / surface them when:\n\n- Jacob explicitly asks for the word count\n- The artifact is at submission stage (final formatting pass)\n- A specific length limit is part of a rule Claude is checking (e.g., a 120-word PNAS Significance Statement at final-format pass)\n\nThe default during creative work is \"no word-count anxiety.\" Many useful drafts are long; trimming is a separate pass.\n\n---\n\n## 6. Operating notes for Jacob's projects\n\n- He primarily works in macOS, on bash/zsh shells. Claude Code spawns non-interactive shells which don't source `~/.zshrc` — environment changes need to go in `~/.zshenv` or be prepended per command.\n- LaTeX is via TinyTeX at `~/Library/TinyTeX/bin/universal-darwin/` — prepend to PATH if `which xelatex` returns nothing.\n- Claude is a **faithful formatter, not a co-author**. Substantive content changes need explicit authorization; cosmetic/formatting changes can go directly.\n\n---\n\n## 7. Project-CLAUDE.md mirroring\n\nWhen a rule from this global file applies project-wide and is relevant to a collaborator (e.g., Tony on the Bottom-Up project), the rule should be mirrored into that project's local `CLAUDE.md` so the collaborator's Claude session also follows it. Mirror, don't reference — collaborators may not have access to this global file.\n\n---\n\n## 8. Preserve exploration code and inline notes during any reorganization\n\nJacob is an exploratory researcher: he tries many model variants, EFA/SEM specs, alternative outcomes, sensitivity checks, and only one ends up in the final manuscript. He keeps the code and results from the unused variants because they're his research record.\n\nWhen reorganizing **any** project's codebase, scripts folder, or data tree:\n\n- **Classify, don't cull.** Use `canonical / current` vs. `prior-gen — keep as exploration archive` vs. `out-of-scope` vs. `scratch (system files)` — never `delete-candidate` unless Jacob explicitly says delete.\n- \"Superseded\" means an older subfolder was replaced by a newer one (e.g., `GSS_2/` newer than `GSS_analysis/`). The superseded one is **archive**, not garbage.\n- **Don't strip inline R notes, comments, or section subtitles** during reorganization. Preserve `# ---- 1. Load data ----` markers, multi-line comment blocks, and any prose interleaved with code.\n- If a reorg would consolidate scripts and you would lose comments, propose a *separate archive copy* of the original alongside the consolidated version — don't rewrite-in-place.\n- Frame any \"better organization\" proposal as **additive structure** (a new `MAP.md`, an index file, a folder rename) rather than **deletion of variants**.\n- Default to keeping. When in doubt, ask before removing anything that contains code or text Jacob authored.\n\nOrigin: 2026-05-08, surfaced during the Education-Wellbeing canonical-folder mapping task.\n\n---\n\n## 9. Research-27 runs as a verify-and-loop, never one-shot\n\nWhen Jacob invokes `/research-27` or asks for \"research X\" in a way that triggers the skill, the canonical behavior is in the skill's `SKILL.md` § \"The verify-and-loop pattern (mandatory — never optional)\" (source file: `~/jacob-skills/plugins/research-27/skills/research-27/SKILL.md`; Claude Code loads it from the `jacob-skills` plugin marketplace). The first draft is **Loop 1 of N**, never the final deliverable. Loop 2 (mandatory verification) follows automatically with four sub-passes (source-text fetch-verify, citation-checker triage, source-tier audit, gap detection). Stop on convergence (a full pass with zero corrections) OR 25 loops max — whichever comes first.\n\nQuality > speed. Surface progress to Jacob compactly each loop (\"Loop 2: 2 errors corrected, 3 refinements added, 4 citation-checker findings triaged, 0 fabrications.\").\n\nThe 9-item \"everything is good\" checklist in the skill defines done. The skill is the source of truth — do not duplicate the rules here.\n\nOrigin: 2026-05-08, after Jacob asked for fact-checking discipline on a research brief.\n\n---\n\n## 10. Skill configuration (USER_NAME + tony-github-push)\n\nTwo skills installed via the `Xtzj2333/jacob-skills` plugin marketplace read configuration from this section.\n\n### `USER_NAME` (used by `revision-queue` + `commented-edit-roundtrip` + `citation-deepening`)\n\n```\nUSER_NAME=jacob\n```\n\nFiles produced by these skills are named after this — `jacob_todos.md`, `jacob_actions.md`, `jacob_inbox.docx`, etc. If unset, they default to `user_*`.\n\n### `tony-github-push` configuration\n\nThe skill reads these three values from this block:\n\n- `MANUSCRIPT_DIR`: `manuscript_repo_tony`\n- `MANUSCRIPT_REMOTE`: `https://github.com/tonyl-code/Bottom-Up-Wellbeing-Manuscript`\n- `MANUSCRIPT_BRANCH`: `jacob`\n\nTrigger phrase remains \"tony github push\" / `/tony-github-push`. Skill scope unchanged: stage + commit + push only `${MANUSCRIPT_DIR}`'s working tree to `${MANUSCRIPT_BRANCH}` on `${MANUSCRIPT_REMOTE}`, force-push on conflict (Jacob's branch is authoritative).\n\nOrigin: 2026-05-09, when these skills were promoted into a public plugin marketplace and the previously hardcoded values were extracted into this configuration block.\n",
+    "skills": [
+      {
+        "name": "academic-research-skills",
+        "description": ""
+      },
+      {
+        "name": "citation-checker",
+        "description": "Verify academic citations against CrossRef, Semantic Scholar, and OpenAlex. Detects AI-hallucinated references, chimeric citations, and suspicious patterns."
+      },
+      {
+        "name": "last30days-skill",
+        "description": "Research what people actually say about any topic in the last 30 days. Pulls posts and engagement from Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, and the web."
+      },
+      {
+        "name": "markdown-report-builder",
+        "description": "Build polished `.docx` (via pandoc reference doc) and `.pdf` (via Eisvogel LaTeX template) from a markdown source. Cross-project; one-time setup per project, then `./reports/build.sh report.md` produces a clean Word + PDF pair. Use when Jacob asks to \"render this report\" / \"build a polished version\""
+      },
+      {
+        "name": "paper-retrieval",
+        "description": "Use when the user asks to find or download the PDF of a specific named academic paper by title, author, or DOI. Triggers on \"download paper X\", \"find/get the PDF of Y\", \"fetch this paper\", \"get the full text of Z\", or upgrading an ABSTRACT-ONLY reference to FULL-PDF. Skip for general literature expl"
+      },
+      {
+        "name": "paper-search",
+        "description": "Search, download, and read academic papers from 20+ sources (arXiv, PubMed, Semantic Scholar, CrossRef, etc). Use when the user asks to find papers, search for research, look up academic literature, download a paper PDF, or extract text from a paper."
+      },
+      {
+        "name": "research-mode",
+        "description": "Anti-hallucination research mode. Toggle on to enforce citation requirements, source grounding, and \"I don't know\" behavior. Toggle off for creative work."
+      }
+    ],
+    "commands": []
+  },
+  "source_paths": {
+    "settings_json": "~/.claude/settings.json",
+    "mcp_servers": "~/.claude.json (mcpServers field only)",
+    "global_claude_md": "~/.claude/CLAUDE.md",
+    "skills": "~/.claude/skills/<name>/SKILL.md",
+    "commands": "~/.claude/commands/<name>.md"
+  },
+  "redactions_applied": {
+    "secret_patterns_matched": 0,
+    "secret_keys_redacted": 0,
+    "home_paths_normalized": 0
+  },
+  "notes": [
+    "All known API-key shapes (sk-, tvly-, ghp_, AKIA, JWT, etc.) replaced with <REDACTED:type> tokens.",
+    "Object keys whose name contains api_key/token/secret/password/auth had their string values redacted.",
+    "Local home paths (/Users/<you>/) normalized to ${HOME} for portability.",
+    "Slash-command and skill listings include name + description only — full body not published.",
+    "If you spot anything sensitive that wasn't caught, edit this file by hand before committing."
+  ]
+}
