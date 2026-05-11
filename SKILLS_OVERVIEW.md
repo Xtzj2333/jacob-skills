@@ -1,13 +1,18 @@
 # What each skill does
 
-Seven collaborator-facing skills, grouped by purpose:
+Eight collaborator-facing skills, grouped by purpose:
 
 - **Citations** — `research-27` (produce), `citation-deepening` (verify content), `source-quality-check` (rate quality)
 - **Manuscript revision loop** — `commented-edit-roundtrip` (bridges margin comments and TODOs), `revision-queue` (state machine + audit log)
 - **Push utility** — `tony-github-push`
+- **Project navigation** — `project-map` (creates and maintains `MAP.md` orientation files at project roots)
 - **Cowork-only personal-life utility** — `calendar-search` (Google Calendar lookup; Jacob-personalized — install on Cowork, not Claude Code)
 
-> An 8th plugin, `sync-cowork-skill`, is published in the marketplace but is Jacob-internal tooling (it publishes Cowork-side edits to this marketplace). Collaborators have no use for it; it is intentionally not described in this overview.
+> **Plus one utility skill** — `project-filename` — called by `revision-queue`, `commented-edit-roundtrip`, and `citation-deepening` to produce per-project filenames in the `<role> [<project>].<ext>` convention. You won't trigger it directly; the other skills invoke it. Documented in its own SKILL.md if you want the details.
+
+> **Plus two Jacob-internal plugins** in the marketplace but not described here, because collaborators have no use for them:
+> - `sync-cowork-skill` — publishes Cowork-side skill edits back to this marketplace.
+> - `claude-env-sync` — publishes a redacted Claude-environment snapshot and diffs against a published one. Used to keep Jacob's two Macs in sync; useless to anyone with one Claude install.
 
 ---
 
@@ -22,6 +27,7 @@ Seven collaborator-facing skills, grouped by purpose:
 | 5 | revision-queue | "create a TODO" / "process these" / "close TODO N" | `todos [<shorthand>].md` + `completed_actions_log [<shorthand>].md` | per project |
 | 6 | tony-github-push | "tony github push" / `/tony-github-push` | Push of configured dir to configured branch | one configured dir |
 | 7 | calendar-search | "is X on my calendar" / "do I have a Y" / "when is my Z" | Located event with calendar name + source-zone time | every calendar in your account |
+| 8 | project-map | "set up a MAP" / "create a project map" / "orient me to this folder" | `MAP.md` at the folder root — folder structure, source/draft flags, provenance | one MAP per folder root |
 
 ---
 
@@ -278,6 +284,34 @@ One command for a routine push, with the right `cd` / branch / staging done for 
 **When NOT to use.** Creating new events (separate skill). Generic to-do operations. Anything not actually on a calendar (Gmail / Notes / phone reminders).
 
 **Why it's useful.** The naive "default calendar + `fullText`" query silently fails on CJK titles and on events that don't live in the default calendar. This skill encodes the working recipe: iterate every calendar, expand keywords across languages, chunk where needed, preserve timezones. Catches what the default lookup misses.
+
+---
+
+## 8. project-map — `MAP.md` orientation files at folder roots
+
+**Trigger phrases.** "set up a MAP", "create a project map", "make a MAP.md", "orient me to this folder". Also fires automatically when starting work in a new project directory without an existing `MAP.md`, or when an existing one is clearly stale (files moved / renamed / added since last update).
+
+**Anti-trigger.** Generic "list files" / "show the directory" / `ls` — those don't need a written MAP.
+
+**Input.** Any folder you want oriented. For a fresh MAP, the skill walks the directory. For an update, it diffs against the existing `MAP.md`.
+
+**Output.** A `MAP.md` file at the folder root containing:
+
+- One-line orientation — what this directory is, who's it for, current state
+- Folder tree of immediate children with one-line descriptions
+- Source / draft flags (`(source)`, `(claude)`, canonical)
+- Provenance section for non-obvious files (especially convention-mandated names like `CLAUDE.md`, `HANDOFF.md`, `MAP.md` itself)
+- Git/share status for collaborative projects (local-only vs. pushable vs. shared)
+
+**Location encodes scope.** Always `MAP.md` at the folder root. Subfolders MAY have their own `MAP.md` only when complex enough to warrant separate orientation (same pattern as `README.md`).
+
+**Legacy migration.** Older projects may have `INDEX.md` (the legacy name). The skill renames it to `MAP.md`, updates text references in nearby `CLAUDE.md` / `HANDOFF.md` / `README.md` / SKILL.md files, and commits the rename as a discrete commit so history stays clean. Files like `SCRIPTS_INDEX.md`, `PROJECT_INDEX.md` are different concepts and are left alone.
+
+**When to use.** Starting a new project. Inheriting an unfamiliar codebase. After a significant reorg when the prior MAP no longer matches. Anywhere a future Claude session would benefit from a 60-second orientation.
+
+**When NOT to use.** Quick `ls`-style questions. Anywhere a `README.md` is already authoritative and current. Folders that won't be touched again.
+
+**Why it's useful.** Future Claude sessions (and humans) can orient to a project in one read instead of reverse-engineering structure from filenames. Particularly load-bearing in research projects where the working tree has mixed source / draft / archive material that's not obvious from filenames alone.
 
 ---
 

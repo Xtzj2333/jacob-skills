@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-05-11 — `project-map` skill + `claude-env-sync` v0.3
+
+**TL;DR:** New `project-map` skill produces and maintains `MAP.md` orientation files at folder roots (legacy `INDEX.md` name is migrated). `claude-env-sync` plugin bumped to v0.3 with stronger version-pinning of installed plugins and zero-false-positive self-compare.
+
+### `project-map` (new plugin)
+
+- Folder-orientation skill — creates `MAP.md` at a project root and updates it when files move/rename/add. Subfolder MAPs are optional, used only when the parent's MAP can't describe a subfolder in one paragraph.
+- Migrates legacy `INDEX.md` files to `MAP.md`, including text references in nearby `CLAUDE.md` / `HANDOFF.md` / `README.md` / SKILL.md.
+- Anti-triggers `ls`-style questions — only fires when a written orientation file is genuinely warranted.
+
+### `claude-env-sync` v0.3
+
+- **Snapshot format bumped 0.2 → 0.3.** Backward-compat preserved: v0.1 and v0.2 snapshots still load; missing fields are treated as empty.
+- **New capture:** `~/.claude/plugins/installed_plugins.json`. Pins, for every installed plugin, the version + git commit SHA + install date. The diff now answers "are we on the same plugin versions?" directly — strictly more useful than per-file diffs of plugin caches.
+- **Bug fix — asymmetric comparison.** The publisher applies redaction + `${HOME}` normalization before writing snapshots; the comparer previously read local files raw. Self-compare was producing false positives (MCP servers, central files showing as "different" by 10 chars — exactly one un-normalized home path). The comparer now mirrors the same transforms on local reads.
+- **Bug fix — skill listing pollution.** Skill enumeration now requires `SKILL.md` at the top of each candidate directory. Drops `.git/` and bundle directories (e.g. `academic-research-skills`) that were polluting the user-skills list.
+- **New capture:** central reference files under `~/Claude/` (currently `manuscript-rules.md`) — for lab-agnostic project rules `@`-imported by project-local `CLAUDE.md`.
+
+### `SKILLS_OVERVIEW.md` updated
+
+Reflects the new plugin count: 8 collaborator-facing skills (added `project-map`), 1 utility called by others (`project-filename`, unchanged), 2 Jacob-internal plugins (`sync-cowork-skill` + new `claude-env-sync`).
+
+---
+
 ## 2026-05-10 — `USER_NAME` retired, replaced by `project-filename` skill
 
 **TL;DR:** The three skills that produced per-user files (`revision-queue`, `commented-edit-roundtrip`, `citation-deepening`) no longer use a `USER_NAME` environment variable. A new skill, `project-filename`, defines a per-*project* naming convention instead.
