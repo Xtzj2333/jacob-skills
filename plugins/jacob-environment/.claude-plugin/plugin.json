@@ -1,6 +1,0 @@
-{
-  "name": "jacob-environment",
-  "description": "Jacob's portable environment: notification + permission-prompt chimes, completion-sound Stop hook, and shared MCP server set (Tavily, Zotero). API keys stay per-user via env-var substitution.",
-  "version": "0.1.0",
-  "author": { "name": "Jacob Zhang" }
-}
