@@ -209,7 +209,7 @@ Keeps "open" / "approved" / "done" cleanly separated with a permanent dated audi
 
 **The push contract — three rules, exact:**
 
-1. **Only the configured `${MANUSCRIPT_DIR}` is pushed.** Sibling folders, top-level files (`MAP.md`, `INDEX.md`, etc.), and anything outside that directory are NOT touched. All git commands run from inside `${MANUSCRIPT_DIR}`.
+1. **Only the configured `${MANUSCRIPT_DIR}` is pushed.** Sibling folders, top-level files (`MAP.md`, etc.), and anything outside that directory are NOT touched. All git commands run from inside `${MANUSCRIPT_DIR}`.
 2. **Push target is the configured `${MANUSCRIPT_BRANCH}` only.** Never `main`, never any other branch.
 3. **On non-fast-forward conflict, force-push.** Your local working tree is treated as authoritative for `${MANUSCRIPT_BRANCH}`.
 

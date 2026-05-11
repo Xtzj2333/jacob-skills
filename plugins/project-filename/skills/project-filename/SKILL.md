@@ -43,9 +43,9 @@ Found: `todos [boom].md` in project root
 
 This step is what makes filenames self-stabilizing: once a shorthand is in use in a project, every future session finds it before generating.
 
-### Step 2 — Check `INDEX.md` for a recorded shorthand
+### Step 2 — Check `MAP.md` for a recorded shorthand
 
-If no existing `[<shorthand>]` files are found, look in the project's `INDEX.md` (or `MAP.md`) for a line of the form:
+If no existing `[<shorthand>]` files are found, look in the project's `MAP.md` for a line of the form:
 
 ```
 Shorthand: <shorthand>
@@ -66,9 +66,9 @@ You may also derive from the working directory name if it's already short (e.g.,
 
 If you're genuinely unsure between two reasonable options, **ask Jacob once.** Pick fast — this is a low-stakes decision.
 
-### Step 4 — Optionally record the shorthand in `INDEX.md`
+### Step 4 — Optionally record the shorthand in `MAP.md`
 
-If the project has an `INDEX.md`, add a line `Shorthand: <chosen-shorthand>` near the top so it's discoverable without grepping filenames. Skip if there's no `INDEX.md` — the filenames themselves are sufficient memory (step 1 finds them).
+If the project has a `MAP.md`, add a line `Shorthand: <chosen-shorthand>` near the top so it's discoverable without grepping filenames. Skip if there's no `MAP.md` — the filenames themselves are sufficient memory (step 1 finds them).
 
 ## When invoked
 

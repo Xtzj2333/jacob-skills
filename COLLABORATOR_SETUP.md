@@ -270,7 +270,7 @@ When you're done, all of the below should be true:
 
 **Skill doesn't fire from natural language.** Trigger explicitly with the slash command first (`/research-27`). If the explicit form works, the auto-trigger phrasing might just need to be more specific.
 
-**Skill writes files named `<role> [<project>].<ext>` and you're not sure what `<project>` should be.** The `project-filename` skill picks the shorthand from (1) any existing `* [*].*` files in the project root, (2) `INDEX.md`'s recorded `Shorthand:` line, or (3) generates one from project context. If you want a specific shorthand, name the first file with it (e.g., `todos [myshorthand].md`) and `project-filename` will reuse it after that.
+**Skill writes files named `<role> [<project>].<ext>` and you're not sure what `<project>` should be.** The `project-filename` skill picks the shorthand from (1) any existing `* [*].*` files in the project root, (2) `MAP.md`'s recorded `Shorthand:` line, or (3) generates one from project context. If you want a specific shorthand, name the first file with it (e.g., `todos [myshorthand].md`) and `project-filename` will reuse it after that.
 
 **`tony-github-push` is pushing to Jacob's repo, not yours.** You skipped Part 3.2 — set `MANUSCRIPT_REMOTE` and `MANUSCRIPT_BRANCH` to YOUR repo and branch, not Jacob's.
 

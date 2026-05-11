@@ -52,6 +52,11 @@
       "name": "project-filename",
       "source": "./plugins/project-filename",
       "description": "Per-project output filename convention `<role> [<project>].<ext>`. Called by consumer skills (revision-queue, commented-edit-roundtrip, citation-deepening) to resolve filenames. Lookup-first: existing filenames in the project root are the source of truth, so shorthand stays consistent across sessions without env vars."
+    },
+    {
+      "name": "project-map",
+      "source": "./plugins/project-map",
+      "description": "Creates and maintains MAP.md files — project-navigation files at folder roots that orient Claude (and humans) to what's where, who authored it, and what's source/draft/canonical. Trigger on 'set up a MAP', 'create a project map', 'make a MAP.md', new project orientation when none exists, or stale MAPs after file moves/renames. Standardizes on MAP.md (retires the legacy INDEX.md name, no (claude) suffix). Location encodes scope: one at the project root, optional in complex subfolders."
     }
   ]
 }
