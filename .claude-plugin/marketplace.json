@@ -42,6 +42,11 @@
       "name": "sync-cowork-skill",
       "source": "./plugins/sync-cowork-skill",
       "description": "One-way publish of a Cowork-side skill to its marketplace plugin folder, with mandatory diff + sensitive-content scan + explicit confirm gate. Run from Claude Code only. Jacob-specific (assumes ~/jacob-skills/ as the marketplace clone)."
+    },
+    {
+      "name": "jacob-environment",
+      "source": "./plugins/jacob-environment",
+      "description": "Portable environment plugin: notification + permission-prompt chimes, completion-sound Stop hook, Tavily + Zotero MCP servers. API keys stay per-user via env-var substitution. macOS-targeted (uses osascript + afplay)."
     }
   ]
 }
