@@ -19,7 +19,7 @@ Seven collaborator-facing skills, grouped by purpose:
 | 2 | citation-deepening | "deepen citations" / "fact-check citations" | `.docx` auditing claim-vs-source per ref | 8–12 cites per pass |
 | 3 | source-quality-check | "rate the references" / "are these top-tier" | `.docx` rating each ref's tier / peer-review / recency / author | 8–12 cites per pass |
 | 4 | commented-edit-roundtrip | "process my comments" / "drain the inbox" | Margin comments → TODOs (with audit trail) | one manuscript at a time |
-| 5 | revision-queue | "create a TODO" / "process these" / "close TODO N" | `<USER>_todos.md` + `completed_actions_log.md` | per project |
+| 5 | revision-queue | "create a TODO" / "process these" / "close TODO N" | `todos [<shorthand>].md` + `completed_actions_log [<shorthand>].md` | per project |
 | 6 | tony-github-push | "tony github push" / `/tony-github-push` | Push of configured dir to configured branch | one configured dir |
 | 7 | calendar-search | "is X on my calendar" / "do I have a Y" / "when is my Z" | Located event with calendar name + source-zone time | every calendar in your account |
 
@@ -87,7 +87,7 @@ Not every project uses every skill. A common sequence:
 
 **Built-in safety check.** A separate-context Claude validation agent runs after the draft to verify every quote attributed to a `FULL-PDF` source actually appears in that PDF. Catches hallucinated quotes the main author missed. **Non-negotiable** — never skipped.
 
-**Surfaces problems as TODOs.** Citation-metadata errors and claim-source mismatches go into `<USER>_todos.md` (using `revision-queue` conventions). Never auto-edits the manuscript or bibliography — substantive changes need your sign-off.
+**Surfaces problems as TODOs.** Citation-metadata errors and claim-source mismatches go into `todos [<shorthand>].md` (using `revision-queue` conventions). Never auto-edits the manuscript or bibliography — substantive changes need your sign-off.
 
 **When to use.** Late-stage manuscript review. Pre-submission. Reviewer-response prep ("a reviewer is asking what cite [7] actually says"). After heavy AI-assisted drafting.
 
@@ -167,22 +167,22 @@ Reading a manuscript and reading a code-style diff are different cognitive modes
 
 | File | Role |
 | --- | --- |
-| `<USER>_todos.md` | Currently-open items. One section per TODO: artifact (screenshot/quote/diff) → issue → options → Claude's recommendation. |
-| `completed_actions_log.md` | Append-only chronological audit. One entry per resolved item, tagged `[TYPE: ACTION]` (code/text edit) or `[TYPE: TODO]` (resolved without edit — e.g., declined, prior-fix). |
+| `todos [<shorthand>].md` | Currently-open items. One section per TODO: artifact (screenshot/quote/diff) → issue → options → Claude's recommendation. |
+| `completed_actions_log [<shorthand>].md` | Append-only chronological audit. One entry per resolved item, tagged `[TYPE: ACTION]` (code/text edit) or `[TYPE: TODO]` (resolved without edit — e.g., declined, prior-fix). |
 
-`<USER>` is your `USER_NAME` env-var (set in your global CLAUDE.md per Part 3 of the setup doc).
+`<shorthand>` is a short, memorable per-project tag (e.g., `boom`). It's resolved by the new `project-filename` skill — Claude picks it on first use of a project (or reads it from any existing `* [*].*` files) and reuses it after that. No env-var configuration needed. (This replaces the older `${USER_NAME}_*` convention as of 2026-05-10 — see [CHANGELOG.md](./CHANGELOG.md).)
 
-**Optional 3rd file** `<USER>_actions.md` for asynchronous handoffs only — when one session approves and a *different* session executes (e.g., overnight loops). For interactive sessions where Claude approves and applies in the same flow, **skip this layer entirely**.
+**Optional 3rd file** `actions [<shorthand>].md` for asynchronous handoffs only — when one session approves and a *different* session executes (e.g., overnight loops). For interactive sessions where Claude approves and applies in the same flow, **skip this layer entirely**.
 
 ### Decisions come via .docx margin comments, not by editing the markdown
 
-The user comments on the `<USER>_todos.docx` (regenerated from the `.md` by pandoc). Claude reads the comments via `commented-edit-roundtrip`'s `read_docx_comments.py`, filters by `(author, date)`, and acts. The `.md` is never the surface where the user records decisions.
+The user comments on the `todos [<shorthand>].docx` (regenerated from the `.md` by pandoc). Claude reads the comments via `commented-edit-roundtrip`'s `read_docx_comments.py`, filters by `(author, date)`, and acts. The `.md` is never the surface where the user records decisions.
 
 ### Lifecycle of a TODO
 
-1. Claude appends a TODO to `<USER>_todos.md` and regenerates the `.docx`.
+1. Claude appends a TODO to the todos file and regenerates the `.docx`.
 2. You open the `.docx` in Word and leave a margin comment with your decision.
-3. Claude reads the comment, applies the edit (or files a `[TYPE: TODO]` resolution if no code change is needed), appends a log entry, removes the row from `<USER>_todos.md`.
+3. Claude reads the comment, applies the edit (or files a `[TYPE: TODO]` resolution if no code change is needed), appends a log entry, removes the row from the todos file.
 4. Verifier (`verify_state.py`) confirms invariants: no duplicate TODO IDs, log in chronological order, every cross-link resolves, `.docx` mirrors are fresh.
 
 ### Useful organizational features

@@ -5,7 +5,8 @@ comments to) WITHOUT renaming or replacing the file.
 Two phases, both done in-place on the inbox .docx:
   1. EXTRACT — read all comments matching the filter (--author / --since /
      --not-received) and emit JSON. Caller hands this JSON to whatever picks
-     up new TODOs (typically revision-queue's <USER>_todos.md).
+     up new TODOs (typically revision-queue's todos file, resolved via the
+     `project-filename` skill as `todos [<shorthand>].md`).
   2. MARK   — modify each processed comment's body in word/comments.xml so
      it's prefixed with "[RECEIVED YYYY-MM-DD] " and reauthored to "Claude
      (received)". This makes received items visually distinct in Word so the

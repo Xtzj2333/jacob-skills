@@ -1,0 +1,5 @@
+{
+  "name": "project-filename",
+  "description": "Per-project output filename convention: `<role> [<project>].<ext>`. Called by consumer skills (revision-queue, commented-edit-roundtrip, citation-deepening) to determine where to read/write project-scoped artifacts. Lookup-first (filenames self-stabilize), generate-only-if-needed.",
+  "author": { "name": "Jacob Zhang" }
+}

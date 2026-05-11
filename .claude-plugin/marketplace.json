@@ -47,6 +47,11 @@
       "name": "claude-env-sync",
       "source": "./plugins/claude-env-sync",
       "description": "Publish your Claude Code environment as a redacted snapshot to your marketplace repo, and on the import side, interactively diff a published snapshot against your own environment and pick what to take. Replaces the older jacob-environment approach (which stacked hooks instead of comparing). Generic — works for any pair of collaborators."
+    },
+    {
+      "name": "project-filename",
+      "source": "./plugins/project-filename",
+      "description": "Per-project output filename convention `<role> [<project>].<ext>`. Called by consumer skills (revision-queue, commented-edit-roundtrip, citation-deepening) to resolve filenames. Lookup-first: existing filenames in the project root are the source of truth, so shorthand stays consistent across sessions without env vars."
     }
   ]
 }

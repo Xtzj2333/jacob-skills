@@ -1,12 +1,19 @@
 """
 Close a TODO without a code edit (compliment, prior fix, inaction, declined).
 
-Atomically: append a [TYPE: TODO] entry to completed_actions_log.md AND remove
-the TODO section from <USER>_todos.md (where <USER> = $USER_NAME or "user").
+Atomically: append a [TYPE: TODO] entry to the log file AND remove the
+matching TODO section from the todos file.
+
+Filenames are supplied by the caller (Claude resolves them via the
+`project-filename` skill, then passes them as CLI args). The scripts do not
+construct names from any environment variable.
 
 Usage:
-    python3 close_todo.py --dir DIR --todo-id 11 \
-        --resolution no-action \
+    python3 close_todo.py \\
+        --todos-file PATH \\
+        --log-file PATH \\
+        --todo-id 11 \\
+        --resolution no-action \\
         --reason "Misread of source — was a reply, not a delete request"
 
 Resolution must be one of:
@@ -18,14 +25,9 @@ Resolution must be one of:
 """
 import argparse
 import datetime as dt
-import os
 import re
 import sys
 from pathlib import Path
-
-USER = os.environ.get("USER_NAME", "user")
-TODOS_FILE = f"{USER}_todos.md"
-LOG_FILE = "completed_actions_log.md"
 
 VALID_RESOLUTIONS = {"no-action", "compliment", "prior-fix", "declined", "deferred-cancelled"}
 
@@ -56,7 +58,7 @@ def remove_todo(todos_text, start, end):
     return new
 
 
-def append_to_log(log_text, entry, today, batch_label):
+def append_to_log(log_text, entry, today, batch_label, todos_basename):
     today_str = today.strftime("%Y-%m-%d")
     sentinel = "*(Append future batches below this line."
     batch_pat = re.compile(rf"^## Batch {today_str}\b[^\n]*$", re.MULTILINE)
@@ -72,7 +74,7 @@ def append_to_log(log_text, entry, today, batch_label):
         return log_text[:insert_at].rstrip() + "\n\n" + entry + log_text[insert_at:]
     new_batch = (
         f"## Batch {today_str} — {batch_label}\n\n"
-        f"### Source\n`{TODOS_FILE}` TODO closures (no code edits).\n\n"
+        f"### Source\n`{todos_basename}` TODO closures (no code edits).\n\n"
         f"---\n\n{entry}"
     )
     if sentinel in log_text:
@@ -83,7 +85,8 @@ def append_to_log(log_text, entry, today, batch_label):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", required=True)
+    ap.add_argument("--todos-file", required=True, help="Path to the todos markdown file")
+    ap.add_argument("--log-file", required=True, help="Path to the completed-actions log markdown file")
     ap.add_argument("--todo-id", required=True, help="e.g. 11 or 2(a)")
     ap.add_argument("--resolution", required=True, choices=sorted(VALID_RESOLUTIONS))
     ap.add_argument("--reason", required=True)
@@ -91,9 +94,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    proj = Path(args.dir).resolve()
-    todos_path = proj / TODOS_FILE
-    log_path = proj / LOG_FILE
+    todos_path = Path(args.todos_file).resolve()
+    log_path = Path(args.log_file).resolve()
     for p in (todos_path, log_path):
         if not p.exists():
             print(f"Missing required file: {p}", file=sys.stderr)
@@ -120,7 +122,7 @@ def main():
         print("DRY-RUN — would remove this TODO heading:\n", heading, file=sys.stderr)
         return
 
-    new_log = append_to_log(read(log_path), entry, today, args.batch_label)
+    new_log = append_to_log(read(log_path), entry, today, args.batch_label, todos_path.name)
     write(log_path, new_log)
     new_todos = remove_todo(todos_text, start, end)
     write(todos_path, new_todos)

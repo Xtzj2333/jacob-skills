@@ -11,7 +11,7 @@
 1. All 6 skills installed in your Claude Code (CLI).
 2. The same 6 skills installed in Claude Cowork (Desktop GUI), so you have parity across both surfaces.
 3. `/focus` mode enabled in Claude Code.
-4. Your own configuration values (USER_NAME and, if you push to a manuscript repo, the manuscript-push values) set in your global CLAUDE.md.
+4. Your own configuration values (if you push to a manuscript repo, the `tony-github-push` values) set in your global CLAUDE.md.
 5. A clear update workflow: when Jacob pushes new versions of his skills, you pull them with one command on each surface.
 6. A clear source-of-truth boundary: you read Jacob's skills freely, but you never push edits to his repo.
 
@@ -124,32 +124,22 @@ It should fire research-27 and start producing the output specified by the skill
 
 ---
 
-## Part 3 — Configure your USER_NAME and (optionally) manuscript-push values
+## Part 3 — Configure your manuscript-push values (optional)
 
-Three of these skills (`revision-queue`, `commented-edit-roundtrip`, `citation-deepening`) write working files prefixed with a `USER_NAME` variable — e.g., `jacob_todos.md`, `jacob_actions.md`. The default is `user_*` if unset, but you'll want your own name.
+> **2026-05-10 update.** The previous `USER_NAME` env-var has been retired. Three skills (`revision-queue`, `commented-edit-roundtrip`, `citation-deepening`) used to prefix working files with `${USER_NAME}_` — that's gone. Filenames are now resolved per-*project* via the new `project-filename` skill (`todos [<shorthand>].md`, etc.). Nothing for you to configure on this front — your Claude session figures out the shorthand on first use of a project and reuses it after that. See [CHANGELOG.md](./CHANGELOG.md) for the full migration note.
 
-A fourth skill (`tony-github-push`) reads three values pointing at a manuscript repo. The skill is named "tony-github-push" for historical reasons, but the values are configurable — it pushes to whatever you configure.
+The `tony-github-push` skill reads three values pointing at a manuscript repo. The skill is named "tony-github-push" for historical reasons, but the values are configurable — it pushes to whatever you configure. **You only need this section if you use the `tony-github-push` skill.**
 
 ### 3.1 Open or create your global CLAUDE.md
 
 The file is at `~/.claude/CLAUDE.md`. If it doesn't exist, create it.
 
-### 3.2 Add a configuration section
+### 3.2 Add the manuscript-push configuration
 
-Append this section (adjust values to your name and your repo):
+Append this section (adjust values to your repo):
 
 ```markdown
-## Skill configuration (USER_NAME + manuscript-push)
-
-These values configure skills installed via the `Xtzj2333/jacob-skills` plugin marketplace.
-
-### USER_NAME (used by `revision-queue` + `commented-edit-roundtrip` + `citation-deepening`)
-
-```
-USER_NAME=tony
-```
-
-Files produced by these skills are named after this — `tony_todos.md`, `tony_actions.md`, `tony_inbox.docx`, etc.
+## Skill configuration (manuscript-push)
 
 ### Manuscript-push configuration (used by `tony-github-push`)
 
@@ -164,7 +154,11 @@ Trigger phrase: "tony github push" / `/tony-github-push`. Skill scope: stage + c
 
 ### 3.3 Save
 
-The skills will pick up these values on next invocation. (No reload needed; they read the env at run time.)
+The skill picks up these values on next invocation.
+
+### 3.4 Migrating an older project
+
+If you have a project with files from the pre-2026-05-10 convention (`tony_todos.md`, `tony_actions.md`, etc.), rename them once: e.g., `tony_todos.md` → `todos [<your-project-shorthand>].md`. Pick any short, memorable tag for `<your-project-shorthand>` (Claude can help). After the rename, no further configuration is needed — `project-filename` detects the shorthand from the filenames themselves.
 
 ---
 
@@ -255,7 +249,7 @@ When you're done, all of the below should be true:
 - [ ] In Claude Code, typing `/research-27` offers autocomplete and runs the skill
 - [ ] In Cowork, Customize → Personal plugins lists all 6 skills under `jacob-skills`
 - [ ] In a fresh Cowork chat, "research 27 something" actually fires research-27
-- [ ] `~/.claude/CLAUDE.md` has your `USER_NAME` (and manuscript-push values, if applicable)
+- [ ] `~/.claude/CLAUDE.md` has your manuscript-push values, if applicable (no `USER_NAME` needed — retired 2026-05-10)
 - [ ] `/focus` mode is enabled in Claude Code
 - [ ] Your shared-project `CLAUDE.md` mirrors the source-of-truth boundary
 - [ ] You have NOT cloned-with-write or pushed to `Xtzj2333/jacob-skills`
@@ -276,7 +270,7 @@ When you're done, all of the below should be true:
 
 **Skill doesn't fire from natural language.** Trigger explicitly with the slash command first (`/research-27`). If the explicit form works, the auto-trigger phrasing might just need to be more specific.
 
-**Skill writes files named `user_*.md` instead of `<your-name>_*.md`.** `USER_NAME` isn't being read. Check that `~/.claude/CLAUDE.md` has the value in a fenced code block exactly as shown in Part 3.2 (`USER_NAME=<value>` inside triple-backticks).
+**Skill writes files named `<role> [<project>].<ext>` and you're not sure what `<project>` should be.** The `project-filename` skill picks the shorthand from (1) any existing `* [*].*` files in the project root, (2) `INDEX.md`'s recorded `Shorthand:` line, or (3) generates one from project context. If you want a specific shorthand, name the first file with it (e.g., `todos [myshorthand].md`) and `project-filename` will reuse it after that.
 
 **`tony-github-push` is pushing to Jacob's repo, not yours.** You skipped Part 3.2 — set `MANUSCRIPT_REMOTE` and `MANUSCRIPT_BRANCH` to YOUR repo and branch, not Jacob's.
 

@@ -4,8 +4,9 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 
 > **For Jacob's collaborators (Tony et al.):** Two docs were written for you specifically:
 >
-> - **[COLLABORATOR_SETUP.md](./COLLABORATOR_SETUP.md)** — installation walk-through (Claude Code + Cowork), `USER_NAME` and manuscript-push configuration for *your* repo, `/focus` mode setup, and the read-only source-of-truth boundary on this repo.
-> - **[SKILLS_OVERVIEW.md](./SKILLS_OVERVIEW.md)** — concise per-skill summary (what / how / when / why) for all 6 skills, plus a typical end-to-end workflow.
+> - **[COLLABORATOR_SETUP.md](./COLLABORATOR_SETUP.md)** — installation walk-through (Claude Code + Cowork), manuscript-push configuration for *your* repo, `/focus` mode setup, and the read-only source-of-truth boundary on this repo.
+> - **[SKILLS_OVERVIEW.md](./SKILLS_OVERVIEW.md)** — concise per-skill summary (what / how / when / why) for all skills, plus a typical end-to-end workflow.
+> - **[CHANGELOG.md](./CHANGELOG.md)** — recent breaking change (2026-05-10): `USER_NAME` env-var retired; per-project filenames now resolved via the new `project-filename` skill. Read if you upgraded from a pre-2026-05-10 version.
 >
 > Hand both files to your Claude Code session and say "follow these end-to-end." Suggestions are welcome via GitHub issues or PRs from a fork — please don't push directly to this repo.
 
@@ -18,6 +19,7 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 | `source-quality-check` | Rates each cited reference on venue tier, peer-review status, recency-sensitivity, and author credibility. |
 | `commented-edit-roundtrip` | Round-trip editing via Word margin comments. Two modes: perpetual inbox (single .docx the user keeps commenting in forever) and one-shot rewrite (Claude returns the rewrite plus a comments-on-original audit copy). |
 | `revision-queue` | Multi-round revision state machine: two coordinated files (open todos + append-only changelog). Pairs with `commented-edit-roundtrip`. |
+| `project-filename` | Per-project output filename convention `<role> [<project>].<ext>`. Invoked by `revision-queue`, `commented-edit-roundtrip`, and `citation-deepening` to resolve filenames consistently across sessions without env-vars. |
 | `tony-github-push` | Push manuscript edits to a configured remote/branch. Repo URL and branch are read from the user's CLAUDE.md or env, not hardcoded. |
 | `calendar-search` | Multi-calendar Google Calendar lookup with bilingual EN/ZH keyword expansion, chunked windows for noisy calendars, and source-timezone preservation. **Cowork-only** — Jacob does not install on Claude Code (avoids "what's on my calendar" firing in coding sessions). Skill is configured for Jacob's calendar set; fork and adapt the calendar-reference table for your own. |
 | `sync-cowork-skill` | Publishes a Cowork-side skill to its marketplace plugin folder with a mandatory diff + sensitive-content scan + explicit confirm gate. Cowork remains the source of truth (read-only here); GitHub is downstream. **Jacob-specific** — hardcoded to `~/jacob-skills/` as the marketplace clone path. Run from Claude Code only. |

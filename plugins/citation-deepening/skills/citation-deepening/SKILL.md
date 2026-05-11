@@ -162,7 +162,7 @@ If the validator returns FAIL, fix the offending quotes before delivering the do
 
 For any cite the deepening doc verdict-tagged as `CITATION-METADATA-ERROR` or where the source clearly doesn't support the manuscript claim:
 
-- Add a TODO to `revisions/<USER>_todos.md` (via revision-queue conventions).
+- Add a TODO to the project's todos file (via revision-queue conventions; filename resolved by the `project-filename` skill as `todos [<shorthand>].md`).
 - Heading should mention severity: **HIGH** for wrong DOI / wrong paper entirely; **medium** for title-only mismatch or wording softening; **low** for missing bibliographic fields.
 - Body: include the artifact (verbatim citation), the finding (what's actually at the DOI / what the source actually says), 2-3 options for the user, and your recommendation.
 - Do **not** auto-edit the manuscript or References list to "fix" the cite. Substantive bibliographic changes require the user's sign-off.

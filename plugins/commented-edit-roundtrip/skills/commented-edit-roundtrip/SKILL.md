@@ -35,7 +35,7 @@ Both modes share the same docx-comment plumbing (`read_docx_comments.py`, `injec
 | `<project>/revisions/[inbox] <manuscript-basename>.md` | **Claude's editing surface.** Working markdown source for the inbox. | Persistent. Edited by `apply_edit_to_inbox.py`. |
 | `<project>/revisions/[inbox] <manuscript-basename>.docx` | **User's commenting surface.** Rendered from the inbox .md, with carried-forward margin comments. | Persistent. Same path forever. Safe to keep open in Word (close briefly when applying edits). |
 | `<project>/revisions/comment_archive/` (`INDEX.md` + per-comment files) | **Comment graveyard.** Append-only archive of comments displaced by overwriting edits. | Searchable: `grep -r <comment-id> revisions/comment_archive/`. |
-| `<project>/revisions/<USER>_todos.{md,docx}` + `completed_actions_log.{md,docx}` | Discussion + audit trail. | Managed by the `revision-queue` skill. |
+| `<project>/revisions/todos [<shorthand>].{md,docx}` + `completed_actions_log [<shorthand>].{md,docx}` | Discussion + audit trail. | Managed by the `revision-queue` skill. Filenames resolved via `project-filename`. |
 
 **Inverted role model.** This skill's earlier rev had Claude editing canonical directly and treating the inbox as a read-only commenting surface. That coupled "Claude shipped an edit" to "canonical advanced," which prevented the user from holding canonical stable across many small TODO closures. The inverted model decouples the two:
 

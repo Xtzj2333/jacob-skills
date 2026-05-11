@@ -23,7 +23,7 @@ Algorithm:
 
 Usage:
   python3 refresh_inbox.py \\
-      --inbox revisions/<USER>_inbox.docx \\
+      --inbox "revisions/[inbox] <manuscript>.docx" \\
       --new-manuscript <MANUSCRIPT_DIR>/<MANUSCRIPT_FILE>.docx \\
       --archive-dir "manuscript_comment_rounds (claude)"
 """

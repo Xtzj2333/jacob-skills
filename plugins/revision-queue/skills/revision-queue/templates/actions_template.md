@@ -5,15 +5,15 @@
 
 ## Lifecycle
 
-1. Items are first discussed in `<USER>_todos.md` (with screenshots, options, recommendations).
+1. Items are first discussed in `the project's todos file` (with screenshots, options, recommendations).
 2. When the user picks a resolution, the item is **promoted** here as an ACTION block (file path, exact find-text, exact replace-text, verification command, recompile note).
 3. A fresh Claude session executes the ACTION blocks via `execute_action.py`.
 4. After successful execution, the executor (the script) automatically:
-   - Appends an `[TYPE: ACTION]` entry to `completed_actions_log.md` with `before / after / why / verification`.
+   - Appends an `[TYPE: ACTION]` entry to the project's completed-actions log with `before / after / why / verification`.
    - **Removes** the executed ACTION block from this file (so this file always reflects pending work only).
-   - Removes the originating TODO row from `<USER>_todos.md`.
+   - Removes the originating TODO row from `the project's todos file`.
 
-The `completed_actions_log.md` is the single chronological source of truth for resolved items; this file shows only what's still open.
+The completed-actions log is the single chronological source of truth for resolved items; this file shows only what's still open.
 
 ## Repo context
 
@@ -67,6 +67,6 @@ grep -n "..." path/to/file.ext
 
 ---
 
-## What's NOT in this file (still open in `<USER>_todos.md`)
+## What's NOT in this file (still open in `the project's todos file`)
 
 *(list TODOs that are still under discussion, with one-line summaries — keep this in sync as items move)*
