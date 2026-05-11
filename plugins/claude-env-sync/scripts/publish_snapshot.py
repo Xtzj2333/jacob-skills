@@ -2,18 +2,24 @@
 """
 publish_snapshot.py — capture a redacted snapshot of a Claude Code environment.
 
-Reads ~/.claude/settings.json, ~/.claude.json's mcpServers block,
-~/.claude/CLAUDE.md, and the names+descriptions of installed skills and
-slash commands. Redacts API keys, OAuth tokens, and other secrets.
-Writes a JSON snapshot to <marketplace>/snapshots/<owner>.json.
+v0.2 captures (in addition to v0.1):
+  - ~/.claude/.mcp.json (project-style MCP config; merged with ~/.claude.json mcpServers)
+  - ~/.claude/settings.local.json (local-only permissions)
+  - ~/.config/ccstatusline/settings.json (status line config)
+  - ~/.claude/keybindings.json (forward-compat)
+  - ~/.claude/agents/*.md (forward-compat)
+  - claude --version (best-effort)
+  - command BODIES, not just descriptions
+  - plugin-shipped skills (so the diff knows the difference between
+    "user skill at ~/.claude/skills/X" vs "plugin skill from <plugin>")
+  - machine_id (read from ~/.claude/machine_id, or via --machine-id arg)
 
 Usage:
-  publish_snapshot.py --owner jacob --out ../../../snapshots/jacob.json
-  publish_snapshot.py --owner jacob --out /path/to/snapshots/jacob.json --dry-run
+  publish_snapshot.py --owner jacob --machine-id main --out snapshots/jacob_main.json
+  publish_snapshot.py --owner jacob --out snapshots/jacob.json --dry-run
 
-Designed to be safe to commit to a public repo. The redaction is
-conservative — when in doubt, redact. The output is also a human-readable
-JSON file the user should eyeball before committing.
+Designed to be safe to commit to a public repo. Redaction is conservative;
+the output is a human-readable JSON file the user should eyeball before commit.
 """
 
 from __future__ import annotations
@@ -23,39 +29,32 @@ import json
 import os
 import platform
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# --- Snapshot format version ------------------------------------------------
+
+SNAPSHOT_FORMAT_VERSION = "0.3.0"
+
 # --- Redaction patterns -----------------------------------------------------
 
-# Compiled once. Each is a (pattern, replacement) pair.
 SECRET_PATTERNS = [
-    # Anthropic-style
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "<REDACTED:anthropic-key>"),
-    # OpenAI-style
     (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "<REDACTED:sk-key>"),
-    # Tavily
     (re.compile(r"tvly-[A-Za-z0-9_-]{10,}"), "<REDACTED:tavily-key>"),
-    # GitHub PATs
     (re.compile(r"\bghp_[A-Za-z0-9]{20,}"), "<REDACTED:github-pat>"),
     (re.compile(r"\bgho_[A-Za-z0-9]{20,}"), "<REDACTED:github-oauth>"),
     (re.compile(r"\bghs_[A-Za-z0-9]{20,}"), "<REDACTED:github-server-token>"),
     (re.compile(r"\bghu_[A-Za-z0-9]{20,}"), "<REDACTED:github-user-token>"),
-    # AWS
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "<REDACTED:aws-access-key>"),
-    # Bearer tokens in any string
     (re.compile(r"Bearer\s+[A-Za-z0-9._-]{20,}"), "Bearer <REDACTED>"),
-    # JWTs
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"), "<REDACTED:jwt>"),
-    # Slack tokens
     (re.compile(r"\bxox[bps]-[A-Za-z0-9-]{20,}"), "<REDACTED:slack-token>"),
-    # Google API keys
     (re.compile(r"\bAIza[0-9A-Za-z_-]{35}"), "<REDACTED:google-api-key>"),
 ]
 
-# Object-key heuristic: if a key name contains any of these (case-insensitive),
-# treat its string value as a secret.
 SECRET_KEY_SUBSTRINGS = [
     "api_key", "apikey",
     "token", "secret", "password", "passwd",
@@ -64,15 +63,11 @@ SECRET_KEY_SUBSTRINGS = [
     "credential",
 ]
 
-# Keys to keep as-is even if their NAME matches secret heuristic
-# (false-positive guard list).
 SECRET_KEY_ALLOWLIST = {
-    "AUTH",  # if a user actually names a key "AUTH" and means a non-secret, they can rename
-    # leave empty for now
+    "AUTH",
 }
 
-# ~/.claude.json contains a LOT of internal state we don't want to publish.
-# Whitelist the only fields we WILL publish from it.
+# ~/.claude.json contains a LOT of internal state. Whitelist what we publish.
 CLAUDE_JSON_PUBLISHED_KEYS = {"mcpServers"}
 
 
@@ -88,7 +83,6 @@ def is_secret_key_name(key: str) -> bool:
 
 
 def redact_string(s: str, stats: dict) -> str:
-    """Apply all secret-pattern regexes to a string."""
     if not isinstance(s, str):
         return s
     out = s
@@ -101,7 +95,6 @@ def redact_string(s: str, stats: dict) -> str:
 
 
 def normalize_home(s: str, stats: dict) -> str:
-    """Replace literal $HOME path with ${HOME} placeholder."""
     if not isinstance(s, str):
         return s
     home = str(Path.home())
@@ -112,26 +105,17 @@ def normalize_home(s: str, stats: dict) -> str:
 
 
 def redact_value(val, stats: dict, parent_key: str | None = None):
-    """
-    Recursively redact a JSON value.
-    - If parent_key looks like a secret key, redact the entire value.
-    - Otherwise, regex-redact strings and recurse into containers.
-    """
     if parent_key is not None and is_secret_key_name(parent_key) and isinstance(val, str):
         stats["secret_keys_redacted"] += 1
         return f"<REDACTED:{parent_key}>"
-
     if isinstance(val, str):
         v = redact_string(val, stats)
         v = normalize_home(v, stats)
         return v
-
     if isinstance(val, dict):
         return {k: redact_value(v, stats, parent_key=k) for k, v in val.items()}
-
     if isinstance(val, list):
         return [redact_value(item, stats, parent_key=parent_key) for item in val]
-
     return val
 
 
@@ -157,8 +141,49 @@ def read_text_safe(path: Path) -> str | None:
         return None
 
 
-def list_skills(skills_dir: Path) -> list[dict]:
-    """Walk ~/.claude/skills/. Each direct subdir = one skill."""
+def read_mcp_servers(home: Path) -> dict:
+    """
+    Merge mcpServers from ~/.claude.json and ~/.claude/.mcp.json.
+    Both can define MCP servers. .mcp.json wins on conflict (the newer convention).
+    """
+    big = read_json_safe(home / ".claude.json") or {}
+    from_big = big.get("mcpServers", {}) or {}
+
+    side = read_json_safe(home / ".claude" / ".mcp.json") or {}
+    from_side = side.get("mcpServers", {}) or {}
+
+    merged = dict(from_big)
+    merged.update(from_side)
+    return merged
+
+
+def read_machine_id(home: Path, override: str | None) -> str | None:
+    if override:
+        return override
+    f = home / ".claude" / "machine_id"
+    if f.exists():
+        try:
+            v = f.read_text().strip()
+            return v or None
+        except Exception:
+            return None
+    return None
+
+
+def get_claude_version() -> str | None:
+    try:
+        r = subprocess.run(
+            ["claude", "--version"], capture_output=True, text=True, timeout=5
+        )
+        if r.returncode == 0:
+            return r.stdout.strip().splitlines()[0] if r.stdout else None
+    except Exception:
+        pass
+    return None
+
+
+def list_skills(skills_dir: Path, source_label: str) -> list[dict]:
+    """Walk a directory of skill folders. Each direct subdir = one skill."""
     if not skills_dir.is_dir():
         return []
     out = []
@@ -166,10 +191,12 @@ def list_skills(skills_dir: Path) -> list[dict]:
         if not entry.is_dir():
             continue
         skill_md = entry / "SKILL.md"
+        if not skill_md.exists():
+            # Skip non-skill directories: .git/, bundle dirs without top-level SKILL.md, etc.
+            continue
         description = ""
         if skill_md.exists():
             text = skill_md.read_text(errors="replace")
-            # Pull description from YAML frontmatter if present
             m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
             if m:
                 fm = m.group(1)
@@ -177,23 +204,99 @@ def list_skills(skills_dir: Path) -> list[dict]:
                 if d:
                     description = d.group(1).strip().strip('"').strip("'")
             if not description:
-                # Fallback: first non-frontmatter, non-empty, non-heading line
                 body = re.sub(r"^---.*?---\s*", "", text, flags=re.DOTALL).strip()
                 for line in body.splitlines():
                     if line.strip() and not line.lstrip().startswith("#"):
                         description = line.strip()[:200]
                         break
-        out.append({"name": entry.name, "description": description[:300]})
+        out.append({
+            "name": entry.name,
+            "description": description[:300],
+            "source": source_label,
+        })
     return out
 
 
-def list_commands(commands_dir: Path) -> list[dict]:
-    """Walk ~/.claude/commands/. Each *.md = one slash command."""
+def list_plugin_shipped_skills(home: Path) -> list[dict]:
+    """
+    Walk ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/
+    Each plugin can ship multiple skills.
+    """
+    cache = home / ".claude" / "plugins" / "cache"
+    if not cache.is_dir():
+        return []
+    out = []
+    for marketplace in sorted(cache.iterdir()):
+        if not marketplace.is_dir():
+            continue
+        for plugin in sorted(marketplace.iterdir()):
+            if not plugin.is_dir():
+                continue
+            # versions are usually content-hash dirs; pick all and dedupe by skill name later
+            for version in sorted(plugin.iterdir()):
+                if not version.is_dir():
+                    continue
+                skills_dir = version / "skills"
+                if not skills_dir.is_dir():
+                    continue
+                src = f"plugin:{plugin.name}@{marketplace.name}"
+                out.extend(list_skills(skills_dir, source_label=src))
+    # Dedupe by (name, source) — multiple version-cache dirs can produce duplicates
+    seen = set()
+    deduped = []
+    for s in out:
+        key = (s["name"], s["source"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(s)
+    return deduped
+
+
+def list_commands(commands_dir: Path, stats: dict) -> list[dict]:
+    """Walk ~/.claude/commands/. Each *.md = one slash command. Captures BODY too."""
     if not commands_dir.is_dir():
         return []
     out = []
     for f in sorted(commands_dir.iterdir()):
-        if not f.is_file() or f.suffix != ".md":
+        if not f.is_file() or f.suffix.lower() != ".md":
+            continue
+        text = f.read_text(errors="replace")
+        description = ""
+        body_text = ""
+        m = re.search(r"^---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL | re.MULTILINE)
+        if m:
+            fm = m.group(1)
+            d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
+            if d:
+                description = d.group(1).strip().strip('"').strip("'")
+            body_text = text[m.end():].strip()
+        else:
+            body_text = text.strip()
+        if not description:
+            for line in body_text.splitlines():
+                if line.strip() and not line.lstrip().startswith("#"):
+                    description = line.strip()[:200]
+                    break
+        # Redact body before publishing
+        body_redacted = redact_string(body_text, stats)
+        body_redacted = normalize_home(body_redacted, stats)
+        out.append({
+            "name": f.stem,
+            "description": description[:300],
+            "body": body_redacted,
+            "body_chars": len(body_text),
+        })
+    return out
+
+
+def list_agents(agents_dir: Path) -> list[dict]:
+    """Forward-compat: walk ~/.claude/agents/. Each *.md = one agent."""
+    if not agents_dir.is_dir():
+        return []
+    out = []
+    for f in sorted(agents_dir.iterdir()):
+        if not f.is_file() or f.suffix.lower() != ".md":
             continue
         text = f.read_text(errors="replace")
         description = ""
@@ -203,19 +306,13 @@ def list_commands(commands_dir: Path) -> list[dict]:
             d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
             if d:
                 description = d.group(1).strip().strip('"').strip("'")
-        if not description:
-            body = re.sub(r"^---.*?---\s*", "", text, flags=re.DOTALL).strip()
-            for line in body.splitlines():
-                if line.strip() and not line.lstrip().startswith("#"):
-                    description = line.strip()[:200]
-                    break
         out.append({"name": f.stem, "description": description[:300]})
     return out
 
 
 # --- Snapshot builder -------------------------------------------------------
 
-def build_snapshot(owner: str) -> tuple[dict, dict]:
+def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
     home = Path.home()
     stats = {
         "secret_patterns_matched": 0,
@@ -223,53 +320,82 @@ def build_snapshot(owner: str) -> tuple[dict, dict]:
         "home_paths_normalized": 0,
     }
 
-    # --- settings.json ---
     settings_raw = read_json_safe(home / ".claude" / "settings.json") or {}
-
-    # --- ~/.claude.json (only mcpServers) ---
-    big_claude_json = read_json_safe(home / ".claude.json") or {}
-    mcp_raw = big_claude_json.get("mcpServers", {})
-
-    # --- global CLAUDE.md ---
+    settings_local_raw = read_json_safe(home / ".claude" / "settings.local.json") or {}
+    mcp_raw = read_mcp_servers(home)
     claude_md_raw = read_text_safe(home / ".claude" / "CLAUDE.md") or ""
+    manuscript_rules_raw = read_text_safe(home / "Claude" / "manuscript-rules.md") or ""
+    keybindings_raw = read_json_safe(home / ".claude" / "keybindings.json") or {}
+    statusline_raw = read_json_safe(home / ".config" / "ccstatusline" / "settings.json") or {}
+    installed_plugins_raw = read_json_safe(home / ".claude" / "plugins" / "installed_plugins.json") or {}
 
-    # --- skills + commands ---
-    skills = list_skills(home / ".claude" / "skills")
-    commands = list_commands(home / ".claude" / "commands")
+    user_skills = list_skills(home / ".claude" / "skills", source_label="user")
+    plugin_skills = list_plugin_shipped_skills(home)
+    commands = list_commands(home / ".claude" / "commands", stats)
+    agents = list_agents(home / ".claude" / "agents")
 
-    # --- redact ---
+    # Redact everything. Commands' body field is already redacted in list_commands.
     settings = redact_value(settings_raw, stats)
+    settings_local = redact_value(settings_local_raw, stats)
     mcp = redact_value(mcp_raw, stats)
     claude_md = redact_string(claude_md_raw, stats)
     claude_md = normalize_home(claude_md, stats)
-    skills = redact_value(skills, stats)
-    commands = redact_value(commands, stats)
+    manuscript_rules = redact_string(manuscript_rules_raw, stats)
+    manuscript_rules = normalize_home(manuscript_rules, stats)
+    keybindings = redact_value(keybindings_raw, stats)
+    statusline = redact_value(statusline_raw, stats)
+    installed_plugins = redact_value(installed_plugins_raw, stats)
+    user_skills = redact_value(user_skills, stats)
+    plugin_skills = redact_value(plugin_skills, stats)
+    agents = redact_value(agents, stats)
 
     snapshot = {
-        "snapshot_version": "0.1.0",
+        "snapshot_version": SNAPSHOT_FORMAT_VERSION,
         "owner": owner,
+        "machine_id": machine_id,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "platform": platform.system().lower(),
+        "claude_version": get_claude_version(),
         "environment": {
             "settings_json": settings,
+            "settings_local_json": settings_local,
             "mcp_servers": mcp,
             "global_claude_md": claude_md,
-            "skills": skills,
+            "central_files": {
+                "manuscript-rules.md": manuscript_rules,
+            },
+            "keybindings": keybindings,
+            "statusline": statusline,
+            "skills_user": user_skills,
+            "skills_plugin": plugin_skills,
             "commands": commands,
+            "agents": agents,
+            "installed_plugins": installed_plugins,
         },
         "source_paths": {
             "settings_json": "~/.claude/settings.json",
-            "mcp_servers": "~/.claude.json (mcpServers field only)",
+            "settings_local_json": "~/.claude/settings.local.json",
+            "mcp_servers": "~/.claude.json mcpServers + ~/.claude/.mcp.json mcpServers (merged)",
             "global_claude_md": "~/.claude/CLAUDE.md",
-            "skills": "~/.claude/skills/<name>/SKILL.md",
-            "commands": "~/.claude/commands/<name>.md",
+            "central_files": "~/Claude/<filename>.md — lab-agnostic central rules files referenced by project-local CLAUDE.md via @-import; flat name→content map",
+            "keybindings": "~/.claude/keybindings.json",
+            "statusline": "~/.config/ccstatusline/settings.json",
+            "skills_user": "~/.claude/skills/<name>/SKILL.md",
+            "skills_plugin": "~/.claude/plugins/cache/<mp>/<plugin>/<ver>/skills/<name>/SKILL.md",
+            "commands": "~/.claude/commands/<name>.md (frontmatter + body)",
+            "agents": "~/.claude/agents/<name>.md",
+            "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
+            "machine_id": "~/.claude/machine_id (one-line file)",
+            "claude_version": "subprocess `claude --version`",
         },
         "redactions_applied": stats,
         "notes": [
             "All known API-key shapes (sk-, tvly-, ghp_, AKIA, JWT, etc.) replaced with <REDACTED:type> tokens.",
             "Object keys whose name contains api_key/token/secret/password/auth had their string values redacted.",
             "Local home paths (/Users/<you>/) normalized to ${HOME} for portability.",
-            "Slash-command and skill listings include name + description only — full body not published.",
+            "Slash-command bodies are captured (redacted). Skill bodies are NOT — only name + description.",
+            "Plugin-shipped skills are listed with source='plugin:<plugin>@<marketplace>'; user-level with source='user'.",
+            "Forward-compat fields (agents, keybindings) may be empty if those directories don't exist on this machine.",
             "If you spot anything sensitive that wasn't caught, edit this file by hand before committing.",
         ],
     }
@@ -281,11 +407,15 @@ def build_snapshot(owner: str) -> tuple[dict, dict]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--owner", required=True, help="Snapshot owner identifier (e.g. 'jacob')")
+    ap.add_argument("--machine-id", default=None,
+                    help="Per-machine identifier (e.g. 'main', 'jz1'). "
+                         "If omitted, reads ~/.claude/machine_id.")
     ap.add_argument("--out", required=True, help="Output path for snapshot JSON")
     ap.add_argument("--dry-run", action="store_true", help="Print to stdout instead of writing")
     args = ap.parse_args()
 
-    snapshot, stats = build_snapshot(args.owner)
+    machine_id = read_machine_id(Path.home(), args.machine_id)
+    snapshot, stats = build_snapshot(args.owner, machine_id)
     text = json.dumps(snapshot, indent=2, ensure_ascii=False)
 
     if args.dry_run:
@@ -299,7 +429,8 @@ def main() -> int:
     print(
         f"Redactions: {stats['secret_patterns_matched']} key-shape matches, "
         f"{stats['secret_keys_redacted']} key-name redactions, "
-        f"{stats['home_paths_normalized']} home-path normalizations.",
+        f"{stats['home_paths_normalized']} home-path normalizations. "
+        f"machine_id={machine_id!r}.",
         file=sys.stderr,
     )
     return 0

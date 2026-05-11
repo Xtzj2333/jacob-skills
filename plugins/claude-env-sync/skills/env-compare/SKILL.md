@@ -54,15 +54,22 @@ If the script errors (URL 404, malformed JSON), report the error and ask the use
 open /tmp/env_diff_${TS}.html
 ```
 
-Then summarize in chat in 4–5 lines, e.g.:
+Then summarize in chat in 5–8 lines, e.g.:
 
-> Diff vs `<owner>`'s snapshot (generated YYYY-MM-DD):
+> Diff vs `<owner>` (`<machine_id>`)'s snapshot (format vN, generated YYYY-MM-DD, their claude version: VV):
 > - Hook events differing: N
 > - MCP servers — theirs only: N · yours only: N · both, different: N
-> - Skills they have you don't: N (sample names: …)
-> - Commands they have you don't: N (sample names: …)
+> - User-level skills (`~/.claude/skills/`): theirs only N · yours only N
+> - Plugin-shipped skills: theirs only N · yours only N (note: gap usually closed by enabling the right plugin, not copying files)
+> - Commands: theirs only N · yours only N · both-but-body-diverged N
+> - Agents (forward-compat): theirs only N · yours only N
+> - settings.local.json: identical / differs (Bash + tool permission patterns)
+> - statusline config: identical / differs
+> - keybindings: identical / differs / both-empty
 > - Settings keys differing: N (names: …)
 > - Global CLAUDE.md: identical / differs (theirs T chars vs yours M chars)
+> - Central reference files (~/Claude/): N identical · N differ · N only-one-side
+> - Installed plugins: N same · N version-diff · N sha-only-diff · N theirs-only · N yours-only
 
 ### Step 3 — Walk through each diff bucket with active judgment
 
@@ -93,10 +100,16 @@ Then summarize in chat in 4–5 lines, e.g.:
 | Bucket | Apply = |
 |---|---|
 | Hook events | Edit `~/.claude/settings.json` `hooks.<event>` to the chosen value (replace, append, or no-op). |
-| MCP servers (theirs-only / both-different) | Edit `~/.claude.json` `mcpServers` to add or replace the chosen entry. Tell user any `${VAR}` placeholders that need to be set in `~/.zshenv`. |
+| MCP servers (theirs-only / both-different) | Edit either `~/.claude.json` `mcpServers` OR `~/.claude/.mcp.json` `mcpServers` to add or replace the chosen entry. Tell user any `${VAR}` placeholders that need to be set in `~/.zshenv`. **Both files exist; prefer `~/.claude/.mcp.json` for new entries unless the user explicitly wants the entry in `~/.claude.json`.** |
 | Settings keys | Edit `~/.claude/settings.json` to set the chosen key to the chosen value. **Special-case `enabledPlugins` and `extraKnownMarketplaces`: union-merge by default, ask if conflict on the same plugin.** |
-| Skills (theirs-only) | Skills typically ship inside plugins. Recommend `/plugin install <plugin-name>@<marketplace-name>` rather than copying files. If you can identify which plugin in the snapshot owner's marketplace ships the skill, name it. If not, suggest the user ask the snapshot owner. |
-| Commands (theirs-only) | Same pattern as skills. |
+| settings.local.json | This is per-machine local permissions. Don't mass-copy; show specific entries (e.g. `Bash(gh repo *)`) and recommend item-by-item — usually keep yours since these reflect your actual workflow. |
+| statusline config | Whole-file blob (`~/.config/ccstatusline/settings.json`). If user wants theirs, write it whole; otherwise keep yours. |
+| keybindings | Whole-file blob (`~/.claude/keybindings.json`). Same approach. |
+| User-level skills (theirs-only) | Most skills ship inside plugins; if it's a plugin-shipped one, recommend `/plugin install <plugin>@<marketplace>`. If it's truly user-level on the snapshot owner's machine (not in any plugin), the right path is for the owner to promote it to a plugin first — file a GitHub issue / ask them. |
+| Plugin-shipped skills (theirs-only) | The `source` field tells you which plugin: e.g., `plugin:apa-format@jacob-skills`. Recommend `/plugin install <plugin>@<marketplace>`. |
+| Commands (theirs-only) | Same as user-level skills — usually plugin-shipped via the same mechanism, OR can be copied as a single `.md` file into `~/.claude/commands/`. If you copy: read the snapshot's `body` field, write to `~/.claude/commands/<name>.md` with frontmatter + body. |
+| Commands (body-diverged on both sides) | Show side-by-side body. If user wants theirs, overwrite `~/.claude/commands/<name>.md`. If user wants merge, show specific lines and have user direct. **Default: keep yours** — body divergence usually means intentional local edits. |
+| Agents (theirs-only) | Same single-file pattern as commands. |
 | CLAUDE.md | If both differ: offer to render a side-by-side diff to a temp file (Claude can produce a markdown 3-column table: section / theirs / yours), then let user pick replace / append / skip. Never silently overwrite. |
 
 ### Step 4 — Backup before any write
@@ -105,9 +118,15 @@ The first time you're about to modify any file in `~/.claude/`, create the backu
 
 ```bash
 mkdir -p <BACKUP_DIR>
-cp ~/.claude/settings.json <BACKUP_DIR>/settings.json 2>/dev/null
-cp ~/.claude.json <BACKUP_DIR>/claude.json 2>/dev/null
-cp ~/.claude/CLAUDE.md <BACKUP_DIR>/CLAUDE.md 2>/dev/null
+cp ~/.claude/settings.json       <BACKUP_DIR>/settings.json       2>/dev/null
+cp ~/.claude/settings.local.json <BACKUP_DIR>/settings.local.json 2>/dev/null
+cp ~/.claude.json                <BACKUP_DIR>/claude.json         2>/dev/null
+cp ~/.claude/.mcp.json           <BACKUP_DIR>/mcp.json            2>/dev/null
+cp ~/.claude/CLAUDE.md           <BACKUP_DIR>/CLAUDE.md           2>/dev/null
+cp ~/.claude/keybindings.json    <BACKUP_DIR>/keybindings.json    2>/dev/null
+cp -R ~/.claude/commands         <BACKUP_DIR>/commands            2>/dev/null
+cp -R ~/.claude/agents           <BACKUP_DIR>/agents              2>/dev/null
+cp ~/.config/ccstatusline/settings.json <BACKUP_DIR>/ccstatusline.json 2>/dev/null
 ```
 
 Tell the user where the backup is. Include restore instructions.

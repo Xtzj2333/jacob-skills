@@ -1,6 +1,6 @@
 ---
 name: publish-env-snapshot
-description: Capture a redacted snapshot of the user's Claude Code environment (settings.json, mcpServers, global CLAUDE.md, installed skills + commands) and publish it to a git repo so collaborators can compare against it. Use when the user says "publish my claude env", "publish my env snapshot", "update my env snapshot", "snapshot my claude setup", "/publish-env-snapshot", or asks to refresh the snapshot a collaborator pulls from.
+description: Capture a redacted snapshot of the user's Claude Code environment (settings.json, settings.local.json, mcpServers from both ~/.claude.json and ~/.claude/.mcp.json, global CLAUDE.md, statusline config, installed user-level + plugin-shipped skills, slash commands with bodies, agents) and publish it to a git repo so collaborators can compare against it. Use when the user says "publish my claude env", "publish my env snapshot", "update my env snapshot", "snapshot my claude setup", "/publish-env-snapshot", or asks to refresh the snapshot a collaborator pulls from.
 ---
 
 # publish-env-snapshot
@@ -15,16 +15,31 @@ User asks to publish, refresh, or update an environment snapshot so a collaborat
 
 ## What the snapshot is
 
-A single JSON file (default name: `<owner>.json`) containing the user's redacted Claude Code config: settings.json contents, mcpServers config (keys redacted), global CLAUDE.md, list of installed skills + commands. Lives at `<repo>/snapshots/<owner>.json` in a public-or-collaborator-readable git repo.
+A single JSON file (default name: `<owner>_<machine_id>.json` if a machine_id is set, else `<owner>.json`) containing the user's redacted Claude Code config: settings.json + settings.local.json, merged mcpServers from both `~/.claude.json` and `~/.claude/.mcp.json` (keys redacted), global CLAUDE.md, central reference files (e.g. `~/Claude/manuscript-rules.md`), statusline config, keybindings, agents, list of user-level + plugin-shipped skills, slash commands (including their bodies), and `installed_plugins.json` (version + git SHA pinning for every installed plugin). Lives at `<repo>/snapshots/<filename>` in a public-or-collaborator-readable git repo.
+
+## Snapshot format version
+
+This skill produces v0.3 snapshots (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older v0.1 and v0.2 snapshots gracefully (treats missing fields as empty / falls back to v0.1 key names).
 
 ## Procedure
 
-### Step 1 — Resolve `<OWNER>` (the snapshot identifier)
+### Step 1 — Resolve `<OWNER>` and `<MACHINE_ID>` (the snapshot identifier)
 
-In priority order:
+`<OWNER>` is the person ("jacob", "tony"). `<MACHINE_ID>` is the per-machine label ("main", "jz1", "work"), only needed when the user runs Claude Code on multiple machines and wants per-machine snapshots.
+
+**Resolve `<OWNER>` in priority order:**
 1. Look for `USER_NAME=...` in `~/.claude/CLAUDE.md` and lowercase it.
 2. Use `$USER` from the environment.
 3. Ask the user: "What identifier should I use for your snapshot? (e.g. `jacob`, `tony`, your first name)"
+
+**Resolve `<MACHINE_ID>` in priority order:**
+1. Read `~/.claude/machine_id` (one-line file). If present, use that.
+2. If absent, ask the user: "Are you on multiple machines? If yes, what's this one called (e.g. `main`, `jz1`, `work`, `laptop`)? If no, hit enter to skip."
+3. If the user gives a machine_id, write it to `~/.claude/machine_id` so future runs auto-resolve. If they skip, leave `<MACHINE_ID>` unset.
+
+**Compose the snapshot filename:**
+- If `<MACHINE_ID>` is set: `<OWNER>_<MACHINE_ID>.json` (e.g. `jacob_main.json`)
+- Otherwise: `<OWNER>.json`
 
 ### Step 2 — Resolve `<TARGET_REPO>` (where the snapshot file goes)
 
@@ -55,20 +70,29 @@ The repo doesn't need to be a full plugin marketplace — a bare repo with a `sn
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/publish_snapshot.py \
     --owner <OWNER> \
-    --out <TARGET_REPO>/snapshots/<OWNER>.json
+    --machine-id <MACHINE_ID> \
+    --out <TARGET_REPO>/snapshots/<FILENAME>
 ```
 
-The script prints a one-line redaction summary to stderr (counts of key-shape matches, key-name redactions, home-path normalizations).
+(Omit `--machine-id` if not set; the script will read `~/.claude/machine_id` itself or leave it null.)
+
+The script prints a one-line redaction summary to stderr (counts of key-shape matches, key-name redactions, home-path normalizations, plus the resolved `machine_id`).
 
 ### Step 4 — Show the user the snapshot for review
 
-**Mandatory before any commit.** Read the just-written `<OWNER>.json` and present a brief summary:
+**Mandatory before any commit.** Read the just-written snapshot file and present a brief summary:
 
-- Hook events captured (names + count of entries each)
-- MCP servers captured (names) — confirm `env` values show `<REDACTED:...>` placeholders, NOT actual key strings
+- Snapshot format version + machine_id + claude --version captured
+- Hook events captured (names + handler counts)
+- MCP servers captured (names) — confirm `env` values show `<REDACTED:...>` placeholders, NOT actual key strings. Note: now sourced from BOTH `~/.claude.json` mcpServers AND `~/.claude/.mcp.json` mcpServers (merged).
 - Settings top-level keys captured
-- Skills count + 5 sample names
-- Commands count + names
+- settings.local.json keys captured (permissions, etc.)
+- Statusline config captured (whole file)
+- User-level skills count + 5 sample names
+- Plugin-shipped skills count + 3 sample `<name>@<plugin>` pairs
+- Commands count + names + that bodies are captured (and look redacted)
+- Agents count (forward-compat, may be 0)
+- Keybindings captured (forward-compat, may be empty)
 - CLAUDE.md captured: yes/no, char count
 - Redaction stats from the script
 
@@ -78,6 +102,9 @@ Then say (verbatim):
 > (a) no real API keys / OAuth tokens visible in the snapshot
 > (b) no `/Users/<your-username>` paths that should have been normalized
 > (c) the CLAUDE.md content is OK to publish (it's your full global instructions)
+> (d) command bodies are OK to publish (they may contain prompt logic you wrote)
+> (e) settings.local.json is OK to publish (it lists your local Bash/tool permissions)
+> (f) statusline config is OK to publish
 >
 > Want me to commit + push, edit something first, or stop here?
 
@@ -101,8 +128,8 @@ cd <TARGET_REPO>
 git status -s
 # If output shows other dirty files, stop and ask the user how to handle them.
 
-git add snapshots/<OWNER>.json
-git -c commit.gpgsign=false commit -m "Refresh env snapshot for <OWNER> (YYYY-MM-DD)"
+git add snapshots/<FILENAME>
+git -c commit.gpgsign=false commit -m "Refresh env snapshot for <OWNER>[<MACHINE_ID>] (YYYY-MM-DD)"
 
 # Determine push target. If on main, push to origin main. If on a different branch, push there.
 current_branch=$(git branch --show-current)
@@ -112,7 +139,7 @@ git push origin "$current_branch"
 After push, tell the user the snapshot is live at:
 
 ```
-https://raw.githubusercontent.com/<gh-owner>/<repo>/<branch>/snapshots/<OWNER>.json
+https://raw.githubusercontent.com/<gh-owner>/<repo>/<branch>/snapshots/<FILENAME>
 ```
 
 This is the URL the collaborator will plug into `env-compare`.
