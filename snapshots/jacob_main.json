@@ -1,10 +1,13 @@
 {
-  "snapshot_version": "0.1.0",
-  "owner": "jacob_main",
-  "generated_at": "2026-05-11T02:26:24Z",
+  "snapshot_version": "0.3.0",
+  "owner": "jacob",
+  "machine_id": "main",
+  "generated_at": "2026-05-12T05:16:34Z",
   "platform": "darwin",
+  "claude_version": "2.1.139 (Claude Code)",
   "environment": {
     "settings_json": {
+      "skillListingBudgetFraction": 0.02,
       "permissions": {
         "allow": [
           "Read(*)",
@@ -77,57 +80,408 @@
       "agentPushNotifEnabled": true,
       "skipAutoPermissionPrompt": true
     },
-    "mcp_servers": {},
-    "global_claude_md": "# Jacob's global Claude rules (cross-session)\n\nThese rules apply to **every** Claude Code session on this Mac, regardless of project. Project-specific rules live in each project's own `CLAUDE.md` and override these where they conflict.\n\nLast updated: 2026-05-08.\n\n---\n\n## 1. Read-in-rendered-form rule (presentation of files for Jacob's review)\n\nWhen Jacob needs to **review or sign off on a file's contents**, do not point him at the raw `.md`, `.tex`, `.bib`, `.json`, `.yaml`, or any other source format. He doesn't read those fluently mid-flow. Always render to a presentable form first:\n\n- **Markdown (`.md`)** → render to `.docx` (via pandoc) **and/or** `.pdf` (via pandoc + xelatex), and reference the rendered file in your message. Open it for him with `open`.\n- **LaTeX (`.tex`)** → compile to `.pdf` and reference the `.pdf`.\n- **Long structured data (JSON, YAML, CSV with many rows)** → summarize the relevant fields in a Markdown table inline in your reply, or render to a PDF table; don't dump raw.\n- **Short snippets (a few lines)** → quote them inline in a fenced code block in your reply; that's fine.\n\nTwo acceptable presentation formats: **PDF** (preferred for static read-through) and **rendered Word/HTML document** (preferred when Jacob will leave inline comments — e.g., a manuscript `.docx` he annotates with margin comments).\n\nFiles Claude edits behind the scenes (state files, logs) don't need to be rendered unless Jacob asks to see them. If unsure whether something needs rendering, render it.\n\n---\n\n## 2. `(source)` / `[source]` rule — read-only reference folders\n\nWhen Jacob marks a folder or file with `(source)` (parens, parallel to `(claude)`) or `[source]` (brackets), or when he asks Claude to label something as a source — that means:\n\n- **READ:** Always allowed. Read its contents freely; cite from it; quote it; build downstream analysis on it.\n- **EDIT / MODIFY / DELETE / RENAME / EXTRACT INTO IT:** **NOT ALLOWED** without explicit per-action permission.\n\nTo request permission, Claude must use the magic phrase **\"extract here\"** (regardless of what the action is — extracting a zip, adding a file, renaming, etc.). The phrase makes the request unambiguous so Jacob recognizes it as a source-folder permission ask and doesn't auto-grant by reflex.\n\n**Renaming is messy** (changes git history, breaks cross-references). If you encounter unmarked content that *should* be flagged as source, **don't rename the file/folder**. Instead, record its source-status in the project's `INDEX.md` (or `MAP.md`) — that's the canonical authoritative record of which items are sources.\n\nExamples:\n\n- `PNAS formatting official docs (source)/` → read PDFs freely; quote PNAS rules; do NOT extract zips or add files inside without an \"extract here\" approval.\n- `Bottom Up Wellbeing/data (source)/cleaned_responses.csv` → read freely for analysis; do NOT alter the file.\n- A markdown file Jacob says \"treat as source\" → record it in INDEX.md as source-flagged, even if the filename isn't suffixed.\n\n---\n\n## 3. INDEX.md / MAP.md required per project\n\nEvery project should have a navigation file at its root: either `INDEX.md` (file map) or `MAP.md` (broader orientation). If neither exists when Claude joins a project, **create one** during the first orientation session.\n\nThe file should at minimum cover:\n\n- The folder structure with one-line descriptions\n- Which folders/files are `(source)` or `(claude)` flagged\n- A Provenance section listing authorship for any non-obvious files\n- (For collaborative projects) which folders/files are local-only vs. shareable with collaborators / pushable to GitHub\n\nUpdate it when files move, get renamed, or change source-status.\n\n---\n\n## 4. `(claude)` suffix — flag AI-generated content awaiting review\n\nA `(claude)` suffix on a folder or file name means it was Claude-generated and has not yet been reviewed/approved item-by-item by the relevant human owner.\n\n- **Whole folder of Claude deliverables awaiting review** → suffix the folder: `lit_review (claude)/`. Files inside don't need their own suffix.\n- **Standalone Claude proposal file** → suffix it: `revision_plan (claude).md`.\n- **New manuscript versions** → use `_PROPOSED` suffix instead (e.g., `bottom_up_wellbeing_v6_PROPOSED.md`). Drop `_PROPOSED` only when the human owner signs off.\n- **DON'T suffix items inside an active Jacob/Claude exchange channel** — the channel encodes the convention.\n- **DON'T suffix mixed-authorship files** — record authorship in INDEX.md Provenance instead.\n- **DON'T suffix convention-mandated filenames** like `CLAUDE.md`, `README.md`, `INDEX.md`, `HANDOFF.md`, `MAP.md`. Their authorship goes in Provenance.\n\nRenames inside git-tracked folders need explicit OK before applying — they change git history.\n\n---\n\n## 5. Word counts and submission discipline\n\nDon't proactively police word counts during brainstorming or drafting. Only enforce / surface them when:\n\n- Jacob explicitly asks for the word count\n- The artifact is at submission stage (final formatting pass)\n- A specific length limit is part of a rule Claude is checking (e.g., a 120-word PNAS Significance Statement at final-format pass)\n\nThe default during creative work is \"no word-count anxiety.\" Many useful drafts are long; trimming is a separate pass.\n\n---\n\n## 6. Operating notes for Jacob's projects\n\n- He primarily works in macOS, on bash/zsh shells. Claude Code spawns non-interactive shells which don't source `~/.zshrc` — environment changes need to go in `~/.zshenv` or be prepended per command.\n- LaTeX is via TinyTeX at `~/Library/TinyTeX/bin/universal-darwin/` — prepend to PATH if `which xelatex` returns nothing.\n- Claude is a **faithful formatter, not a co-author**. Substantive content changes need explicit authorization; cosmetic/formatting changes can go directly.\n\n---\n\n## 7. Project-CLAUDE.md mirroring\n\nWhen a rule from this global file applies project-wide and is relevant to a collaborator (e.g., Tony on the Bottom-Up project), the rule should be mirrored into that project's local `CLAUDE.md` so the collaborator's Claude session also follows it. Mirror, don't reference — collaborators may not have access to this global file.\n\n---\n\n## 8. Preserve exploration code and inline notes during any reorganization\n\nJacob is an exploratory researcher: he tries many model variants, EFA/SEM specs, alternative outcomes, sensitivity checks, and only one ends up in the final manuscript. He keeps the code and results from the unused variants because they're his research record.\n\nWhen reorganizing **any** project's codebase, scripts folder, or data tree:\n\n- **Classify, don't cull.** Use `canonical / current` vs. `prior-gen — keep as exploration archive` vs. `out-of-scope` vs. `scratch (system files)` — never `delete-candidate` unless Jacob explicitly says delete.\n- \"Superseded\" means an older subfolder was replaced by a newer one (e.g., `GSS_2/` newer than `GSS_analysis/`). The superseded one is **archive**, not garbage.\n- **Don't strip inline R notes, comments, or section subtitles** during reorganization. Preserve `# ---- 1. Load data ----` markers, multi-line comment blocks, and any prose interleaved with code.\n- If a reorg would consolidate scripts and you would lose comments, propose a *separate archive copy* of the original alongside the consolidated version — don't rewrite-in-place.\n- Frame any \"better organization\" proposal as **additive structure** (a new `MAP.md`, an index file, a folder rename) rather than **deletion of variants**.\n- Default to keeping. When in doubt, ask before removing anything that contains code or text Jacob authored.\n\nOrigin: 2026-05-08, surfaced during the Education-Wellbeing canonical-folder mapping task.\n\n---\n\n## 9. Research-27 runs as a verify-and-loop, never one-shot\n\nWhen Jacob invokes `/research-27` or asks for \"research X\" in a way that triggers the skill, the canonical behavior is in the skill's `SKILL.md` § \"The verify-and-loop pattern (mandatory — never optional)\" (source file: `~/jacob-skills/plugins/research-27/skills/research-27/SKILL.md`; Claude Code loads it from the `jacob-skills` plugin marketplace). The first draft is **Loop 1 of N**, never the final deliverable. Loop 2 (mandatory verification) follows automatically with four sub-passes (source-text fetch-verify, citation-checker triage, source-tier audit, gap detection). Stop on convergence (a full pass with zero corrections) OR 25 loops max — whichever comes first.\n\nQuality > speed. Surface progress to Jacob compactly each loop (\"Loop 2: 2 errors corrected, 3 refinements added, 4 citation-checker findings triaged, 0 fabrications.\").\n\nThe 9-item \"everything is good\" checklist in the skill defines done. The skill is the source of truth — do not duplicate the rules here.\n\nOrigin: 2026-05-08, after Jacob asked for fact-checking discipline on a research brief.\n\n---\n\n## 10. Skill configuration (USER_NAME + tony-github-push)\n\nTwo skills installed via the `Xtzj2333/jacob-skills` plugin marketplace read configuration from this section.\n\n### `USER_NAME` (used by `revision-queue` + `commented-edit-roundtrip` + `citation-deepening`)\n\n```\nUSER_NAME=jacob\n```\n\nFiles produced by these skills are named after this — `jacob_todos.md`, `jacob_actions.md`, `jacob_inbox.docx`, etc. If unset, they default to `user_*`.\n\n### `tony-github-push` configuration\n\nThe skill reads these three values from this block:\n\n- `MANUSCRIPT_DIR`: `manuscript_repo_tony`\n- `MANUSCRIPT_REMOTE`: `https://github.com/tonyl-code/Bottom-Up-Wellbeing-Manuscript`\n- `MANUSCRIPT_BRANCH`: `jacob`\n\nTrigger phrase remains \"tony github push\" / `/tony-github-push`. Skill scope unchanged: stage + commit + push only `${MANUSCRIPT_DIR}`'s working tree to `${MANUSCRIPT_BRANCH}` on `${MANUSCRIPT_REMOTE}`, force-push on conflict (Jacob's branch is authoritative).\n\nOrigin: 2026-05-09, when these skills were promoted into a public plugin marketplace and the previously hardcoded values were extracted into this configuration block.\n",
-    "skills": [
-      {
-        "name": "academic-research-skills",
-        "description": ""
+    "settings_local_json": {
+      "permissions": {
+        "allow": [
+          "Bash(chmod:*)",
+          "Skill(update-config)",
+          "Bash(gh repo *)",
+          "Bash(gh api *)",
+          "Bash(bun --version)"
+        ]
+      }
+    },
+    "mcp_servers": {
+      "zotero": {
+        "command": "/opt/anaconda3/bin/zotero-mcp",
+        "env": {
+          "ZOTERO_LOCAL": "true"
+        }
       },
+      "youtube-transcript": {
+        "command": "${HOME}/.local/share/uv/tools/mcp-youtube-transcript/bin/mcp-youtube-transcript"
+      },
+      "reddit": {
+        "command": "TODO_replace_with_uvx_or_python_path",
+        "args": [
+          "reddit-mcp"
+        ],
+        "env": {
+          "REDDIT_CLIENT_ID": "TODO",
+          "REDDIT_CLIENT_SECRET": "<REDACTED:REDDIT_CLIENT_SECRET>",
+          "REDDIT_USER_AGENT": "research-bot/1.0"
+        }
+      }
+    },
+    "global_claude_md": "# Jacob's global Claude rules (cross-session)\n\nThese apply to every Claude Code session on this Mac. Project-specific `CLAUDE.md` files override these where they conflict.\n\nLast updated: 2026-05-11.\n\n---\n\n## 1. Prefer principles over rules; nudge, don't prescribe\n\nWhen tempted to enumerate every case (\"if X then A, if Y then B, if Z then C…\"), stop and ask: can the next Claude agent figure this out from a one-sentence principle plus context? Usually yes.\n\nOver-specified rules age badly, crowd out attention from the rules that actually matter, and assume cases you can't predict. Trust the working Claude's in-context judgment. The smallest nudge that produces the right behavior is the right rule.\n\nThis principle governs how every other rule in this file should be read: when a rule lists examples, treat them as illustrative, not exhaustive.\n\n---\n\n## 2. Quality > speed; depth > token count\n\nBe really excessive on planning, thinking, literature review, and online search. Jacob cares a lot about quality, more than turnaround time, and tokens are not a constraint.\n\n- Solve at the root, not the symptom.\n- Think mid-to-long term. Strong foundations beat fast patches.\n- Don't rush. If a problem deserves more search/planning/verification, take it.\n- When there's a chance to verify-and-loop, follow it; don't short-circuit because \"it's taking too many loops.\" It's very much encouraged to be meticulous.\n\nWhen in doubt about whether to cut a corner: don't.\n\n---\n\n## 3. Render before review (HTML default; .docx for comment loops)\n\n**Strict preference: produce a report.** When Claude makes changes in a session — even small ones — Jacob wants a rendered report by default, not just chat output. Silent execution is the wrong default; when in doubt, render. This is a strict preference, not \"render if convenient.\"\n\nNever point Jacob at raw source (`.md`, `.tex`, `.bib`, `.json`, etc.) when he needs to read, review, or sign off. Render first.\n\n- **Default: HTML.** Write a file, `open` it in his browser. Fast, expressive, no toolchain. For interactive review artifacts that evolve across many renders (audits, proposals, decision queues), invoke the `html-review-builder` skill for current conventions.\n- **If Jacob will leave inline / margin comments:** use `.docx` (e.g., `commented-edit-roundtrip`, `revision-queue`).\n- **Anything else** (PDF for paper-stage manuscripts, images for visualizations, slides for presentations, inline code blocks for short snippets, etc.) — match format to purpose, your call.\n\nWhen the rendered file changes substantially, reopen it (`open <file>`) without being asked. The rendered artifact is the primary channel for non-trivial content; keep chat tight, put detail in the report.\n\nInternal state files, logs, and skill-machinery files don't need rendering unless Jacob asks.\n\n---\n\n## 4. Filesystem conventions: source folders, navigation, AI authorship\n\n### `(source)` / `[source]` — read-only reference material\n\nRead freely, cite freely. Editing, renaming, deleting, or extracting *into* them requires explicit per-action permission, requested with the magic phrase **\"extract here\"** so Jacob doesn't auto-grant by reflex. If you find content that *should* be flagged as source but isn't, don't rename — record it in the project's `MAP.md` instead.\n\n### `(claude)` suffix — flags AI-generated content awaiting human review\n\nApply to whole folders of deliverables (`lit_review (claude)/`) or standalone proposal files. Manuscripts use `_PROPOSED` instead. Don't suffix mixed-authorship files (record authorship in `MAP.md` Provenance) or convention-mandated filenames (`CLAUDE.md`, `README.md`, `MAP.md`, `HANDOFF.md`).\n\n### `MAP.md` — required per project\n\nEvery project should have a `MAP.md` at its root: folder structure with one-line descriptions, source/claude flagging, Provenance section for non-obvious authorship, what's shareable vs. local-only. If missing, create one during first orientation — the `project-map` skill defines the convention. Subfolders MAY have their own `MAP.md` only when complex enough to warrant separate orientation; location encodes scope.\n\nRenames in git-tracked folders need explicit OK before applying — they change git history.\n\n---\n\n## 5. Operating notes\n\n- macOS, bash/zsh. Claude Code spawns non-interactive shells that don't source `~/.zshrc` — put env changes in `~/.zshenv` or prepend per command.\n- LaTeX via TinyTeX at `~/Library/TinyTeX/bin/universal-darwin/` — prepend to PATH if `which xelatex` is empty.\n\n---\n\n## 6. Preserve exploration code and inline notes during reorganization\n\nJacob is an exploratory researcher: many model variants exist, only one ships. Unused variants are research record, not garbage.\n\n- **Classify, don't cull.** `canonical / current` vs. `prior-gen archive` vs. `out-of-scope` vs. `scratch`. Never `delete-candidate` unless Jacob says delete.\n- \"Superseded\" = archive, not garbage.\n- Don't strip inline R notes, section markers (`# ---- 1. Load data ----`), or interleaved prose during reorg. If consolidation would lose comments, propose a separate archive copy alongside the consolidated version.\n- Frame reorg proposals as **additive structure** (new `MAP.md`, index, rename), not deletion of variants.\n- Default to keeping. Ask before removing anything Jacob authored.\n\nOrigin: 2026-05-08, Education-Wellbeing canonical-folder mapping task.\n",
+    "central_files": {
+      "manuscript-rules.md": "# Manuscript-project rules — WIP\n\nA central, work-in-progress collection of rules that apply specifically to **manuscript projects** (papers being drafted toward journal/conference submission). Lab-agnostic — Jacob works across multiple labs and these rules apply to all of them.\n\nPull into a manuscript project's local `CLAUDE.md` either by copy-paste or by Claude Code's `@`-import syntax:\n\n```\n@${HOME}/Claude/manuscript-rules.md\n```\n\nThis file is **evolving**. Add new rules as patterns emerge from manuscript work. Treat it as the canonical source — when manuscript rules change, edit here, and downstream projects pick up the change via import.\n\nLast updated: 2026-05-11.\n\n---\n\n## 1. Faithful formatter, not co-author\n\nClaude is a faithful formatter, **not** a co-author. Substantive content changes (rewording an argument, adding a citation, restructuring a section, changing a claim's hedge level) need explicit authorization from the human owner. Cosmetic and formatting changes (typos, spacing, capitalization, reference-list ordering, bibliography formatting) can go directly without asking.\n\nWhen in doubt, ask. The cost of asking is small; the cost of silently rewriting a paragraph is high.\n\n## 2. Don't police word counts mid-draft\n\nDon't surface word counts during brainstorming or drafting. Only enforce when:\n\n- Jacob explicitly asks for the word count\n- The artifact is at submission stage (final formatting pass)\n- A specific length limit is part of a rule Claude is checking (e.g., 120-word PNAS Significance Statement at final-format pass)\n\nDefault during creative work: **no word-count anxiety.** Many useful drafts run long; trimming is a separate pass.\n\n## 3. Draft-version suffix: `_PROPOSED`\n\nManuscripts that Claude generates or substantially revises get a `_PROPOSED` suffix on the filename (e.g., `bottom_up_wellbeing_v6_PROPOSED.md`). Drop the suffix only when the human owner signs off on the version.\n\nThis differs from the `(claude)` suffix used for non-manuscript Claude artifacts (lit reviews, analysis notes, etc.). Manuscripts are the high-stakes case and get their own marker.\n\n## 4. (Future rules — placeholder)\n\nAdd more as they come up. Likely candidates as the file matures:\n\n- HANDOFF.md conventions for collaborator transitions\n- Comment-roundtrip discipline (when responding to inline Word comments)\n- Citation-verification thresholds before integrating a new reference\n- Figure-versioning patterns (matching `_PROPOSED` for visuals)\n- Submission-final formatting checklists by venue\n\n---\n\n*This file is imported / referenced from individual manuscript projects' local `CLAUDE.md`. Edits here propagate to every project that imports it.*\n"
+    },
+    "keybindings": {},
+    "statusline": {
+      "version": 3,
+      "lines": [
+        [
+          {
+            "id": "1",
+            "type": "model",
+            "color": "cyan"
+          },
+          {
+            "id": "2",
+            "type": "separator"
+          },
+          {
+            "id": "1b801047-5e78-4916-ac4e-a1c9f99207e0",
+            "type": "context-percentage-usable"
+          },
+          {
+            "id": "4",
+            "type": "separator"
+          },
+          {
+            "id": "3",
+            "type": "context-length",
+            "color": "brightBlack"
+          },
+          {
+            "id": "4412f198-1434-44c4-9f59-3ffdd7a81365",
+            "type": "separator"
+          },
+          {
+            "id": "a5231aa1-baec-47ac-b686-da0d731a0c75",
+            "type": "thinking-effort"
+          },
+          {
+            "id": "92e8be4e-67a0-489b-8e28-528d810fbd57",
+            "type": "separator"
+          },
+          {
+            "id": "76cc1277-dd3f-4afe-96d3-5fd0fb04c487",
+            "type": "output-style"
+          },
+          {
+            "id": "549f60cc-e328-4b12-a1ac-1c49d84c3c51",
+            "type": "separator"
+          },
+          {
+            "id": "5",
+            "type": "git-branch",
+            "color": "magenta"
+          },
+          {
+            "id": "6",
+            "type": "separator"
+          },
+          {
+            "id": "7",
+            "type": "git-changes",
+            "color": "yellow"
+          }
+        ],
+        [],
+        []
+      ],
+      "flexMode": "full-minus-40",
+      "compactThreshold": 60,
+      "colorLevel": 2,
+      "inheritSeparatorColors": false,
+      "globalBold": false,
+      "minimalistMode": false,
+      "powerline": {
+        "enabled": false,
+        "separators": [
+          ""
+        ],
+        "separatorInvertBackground": [
+          false
+        ],
+        "startCaps": [],
+        "endCaps": [],
+        "autoAlign": false,
+        "continueThemeAcrossLines": false
+      }
+    },
+    "skills_user": [
       {
         "name": "citation-checker",
-        "description": "Verify academic citations against CrossRef, Semantic Scholar, and OpenAlex. Detects AI-hallucinated references, chimeric citations, and suspicious patterns."
+        "description": "Verify academic citations against CrossRef, Semantic Scholar, and OpenAlex. Detects AI-hallucinated references, chimeric citations, and suspicious patterns.",
+        "source": "user"
+      },
+      {
+        "name": "html-review-builder",
+        "description": "Build interactive HTML review reports for multi-turn collaboration with Jacob — the artifact Claude reopens after substantial updates per global CLAUDE.md §3. Different from `markdown-report-builder` (that one renders finished docs to .docx/.pdf). This skill is for live review artifacts that evolve ",
+        "source": "user"
       },
       {
         "name": "last30days-skill",
-        "description": "Research what people actually say about any topic in the last 30 days. Pulls posts and engagement from Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, and the web."
+        "description": "Research what people actually say about any topic in the last 30 days. Pulls posts and engagement from Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, and the web.",
+        "source": "user"
       },
       {
         "name": "markdown-report-builder",
-        "description": "Build polished `.docx` (via pandoc reference doc) and `.pdf` (via Eisvogel LaTeX template) from a markdown source. Cross-project; one-time setup per project, then `./reports/build.sh report.md` produces a clean Word + PDF pair. Use when Jacob asks to \"render this report\" / \"build a polished version\""
+        "description": "Build polished `.docx` (via pandoc reference doc) and `.pdf` (via Eisvogel LaTeX template) from a markdown source. Cross-project; one-time setup per project, then `./reports/build.sh report.md` produces a clean Word + PDF pair. Use when Jacob asks to \"render this report\" / \"build a polished version\"",
+        "source": "user"
       },
       {
         "name": "paper-retrieval",
-        "description": "Use when the user asks to find or download the PDF of a specific named academic paper by title, author, or DOI. Triggers on \"download paper X\", \"find/get the PDF of Y\", \"fetch this paper\", \"get the full text of Z\", or upgrading an ABSTRACT-ONLY reference to FULL-PDF. Skip for general literature expl"
+        "description": "Use when the user asks to find or download the PDF of a specific named academic paper by title, author, or DOI. Triggers on \"download paper X\", \"find/get the PDF of Y\", \"fetch this paper\", \"get the full text of Z\", or upgrading an ABSTRACT-ONLY reference to FULL-PDF. Skip for general literature expl",
+        "source": "user"
       },
       {
         "name": "paper-search",
-        "description": "Search, download, and read academic papers from 20+ sources (arXiv, PubMed, Semantic Scholar, CrossRef, etc). Use when the user asks to find papers, search for research, look up academic literature, download a paper PDF, or extract text from a paper."
+        "description": "ALWAYS invoke this skill when the user asks to search/browse/find academic literature on a topic. Do NOT use WebSearch or general knowledge for \"find papers on X\" / \"what's the literature on Y\" / \"recent work about Z\" — use this skill first. Searches arXiv, PubMed, Semantic Scholar, CrossRef across ",
+        "source": "user"
       },
       {
         "name": "research-mode",
-        "description": "Anti-hallucination research mode. Toggle on to enforce citation requirements, source grounding, and \"I don't know\" behavior. Toggle off for creative work."
+        "description": "Anti-hallucination research mode. Toggle on to enforce citation requirements, source grounding, and \"I don't know\" behavior. Toggle off for creative work.",
+        "source": "user"
       }
     ],
-    "commands": []
+    "skills_plugin": [
+      {
+        "name": "brainstorming",
+        "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "dispatching-parallel-agents",
+        "description": "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "executing-plans",
+        "description": "Use when you have a written implementation plan to execute in a separate session with review checkpoints",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "finishing-a-development-branch",
+        "description": "Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "receiving-code-review",
+        "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "requesting-code-review",
+        "description": "Use when completing tasks, implementing major features, or before merging to verify work meets requirements",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "subagent-driven-development",
+        "description": "Use when executing implementation plans with independent tasks in the current session",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "systematic-debugging",
+        "description": "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "test-driven-development",
+        "description": "Use when implementing any feature or bugfix, before writing implementation code",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "using-git-worktrees",
+        "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - creates isolated git worktrees with smart directory selection and safety verification",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "using-superpowers",
+        "description": "Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "verification-before-completion",
+        "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "writing-plans",
+        "description": "Use when you have a spec or requirements for a multi-step task, before touching code",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "writing-skills",
+        "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+        "source": "plugin:superpowers@claude-plugins-official"
+      },
+      {
+        "name": "citation-deepening",
+        "description": "|",
+        "source": "plugin:citation-deepening@jacob-skills"
+      },
+      {
+        "name": "env-compare",
+        "description": "Fetch a collaborator's published Claude Code environment snapshot, diff it against the user's local environment, render an HTML diff report, and walk the user item-by-item through what to import — with Claude actively judging each conflict and recommending an action. Also surfaces things the local u",
+        "source": "plugin:claude-env-sync@jacob-skills"
+      },
+      {
+        "name": "publish-env-snapshot",
+        "description": "Capture a redacted snapshot of the user's Claude Code environment (settings.json, mcpServers, global CLAUDE.md, installed skills + commands) and publish it to a git repo so collaborators can compare against it. Use when the user says \"publish my claude env\", \"publish my env snapshot\", \"update my env",
+        "source": "plugin:claude-env-sync@jacob-skills"
+      },
+      {
+        "name": "commented-edit-roundtrip",
+        "description": "Round-trip editing between Claude and the user using Word margin comments. Two modes — (A) PERPETUAL INBOX: a single .docx the user keeps adding margin comments to forever; Claude processes comments into TODOs without renaming the file, so the user is never locked out of their commenting surface; (B",
+        "source": "plugin:commented-edit-roundtrip@jacob-skills"
+      },
+      {
+        "name": "research-27",
+        "description": "Produce a credibly-sourced, citation-rich research brief on a user-supplied topic. Treats the response like a mini literature review — every major claim cited inline, mixed-media sources allowed when author/outlet credibility is established, and a verifiable APA-style reference list at the end with ",
+        "source": "plugin:research-27@jacob-skills"
+      },
+      {
+        "name": "revision-queue",
+        "description": "Manage a multi-round revision workflow with two coordinated files — an open-discussion TODO list and an append-only chronological change log. Use when a user is iterating on a manuscript, codebase, or any artifact across many small decisions and wants to keep \"what's open\" and \"what's done\" cleanly ",
+        "source": "plugin:revision-queue@jacob-skills"
+      },
+      {
+        "name": "source-quality-check",
+        "description": "|",
+        "source": "plugin:source-quality-check@jacob-skills"
+      },
+      {
+        "name": "sync-cowork-skill",
+        "description": "One-way publish of a Cowork-side skill (where Jacob actively edits and improves) to the public Xtzj2333/jacob-skills marketplace plugin (what Tony installs). Run from Claude Code only. Trigger on phrases like 'sync calendar-search to github', 'publish my cowork skill', 'push my <skill> to jacob-skil",
+        "source": "plugin:sync-cowork-skill@jacob-skills"
+      },
+      {
+        "name": "tony-github-push",
+        "description": "Push manuscript edits from a configured local subdirectory to a configured branch on a configured GitHub remote. **Trigger ONLY when the user explicitly says one of:** \"tony github push\", \"tony and github push them\", \"push tony\", \"push to tony's github\", \"push to tony\", or invokes \"/tony-github-push",
+        "source": "plugin:tony-github-push@jacob-skills"
+      }
+    ],
+    "commands": [],
+    "agents": [],
+    "installed_plugins": {
+      "version": 2,
+      "plugins": {
+        "superpowers@claude-plugins-official": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0",
+            "version": "5.1.0",
+            "installedAt": "2026-04-18T09:23:28.954Z",
+            "lastUpdated": "2026-05-08T23:16:37.334Z",
+            "gitCommitSha": "b55764852ac78870e65c6565fb585b6cd8b3c5c9"
+          }
+        ],
+        "research-27@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/research-27/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T05:54:56.438Z",
+            "lastUpdated": "2026-05-11T02:25:09.644Z",
+            "gitCommitSha": "5c31a92c5de11c80521da047dbf1766079739418"
+          }
+        ],
+        "citation-deepening@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/citation-deepening/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T05:55:02.397Z",
+            "lastUpdated": "2026-05-11T02:25:09.644Z",
+            "gitCommitSha": "5c31a92c5de11c80521da047dbf1766079739418"
+          }
+        ],
+        "source-quality-check@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/source-quality-check/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T05:55:06.349Z",
+            "lastUpdated": "2026-05-11T02:25:09.645Z",
+            "gitCommitSha": "5c31a92c5de11c80521da047dbf1766079739418"
+          }
+        ],
+        "commented-edit-roundtrip@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/commented-edit-roundtrip/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T05:55:12.173Z",
+            "lastUpdated": "2026-05-11T02:25:09.648Z",
+            "gitCommitSha": "5c31a92c5de11c80521da047dbf1766079739418"
+          }
+        ],
+        "revision-queue@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/revision-queue/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T05:55:17.468Z",
+            "lastUpdated": "2026-05-11T02:25:09.648Z",
+            "gitCommitSha": "5c31a92c5de11c80521da047dbf1766079739418"
+          }
+        ],
+        "tony-github-push@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/tony-github-push/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T05:55:21.749Z",
+            "lastUpdated": "2026-05-11T02:25:09.645Z",
+            "gitCommitSha": "5c31a92c5de11c80521da047dbf1766079739418"
+          }
+        ],
+        "sync-cowork-skill@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/sync-cowork-skill/b9ceecf1e7da",
+            "version": "b9ceecf1e7da",
+            "installedAt": "2026-05-09T14:08:59.146Z",
+            "lastUpdated": "2026-05-11T02:25:09.645Z",
+            "gitCommitSha": "7df1d785a37485c821a0c9eac4769373a719108f"
+          }
+        ],
+        "claude-env-sync@jacob-skills": [
+          {
+            "scope": "user",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/claude-env-sync/0.1.0",
+            "version": "0.1.0",
+            "installedAt": "2026-05-11T02:25:17.065Z",
+            "lastUpdated": "2026-05-11T02:25:17.065Z",
+            "gitCommitSha": "b9ceecf1e7dabe94c8e924d3ca37adca5e31677e"
+          }
+        ]
+      }
+    }
   },
   "source_paths": {
     "settings_json": "~/.claude/settings.json",
-    "mcp_servers": "~/.claude.json (mcpServers field only)",
+    "settings_local_json": "~/.claude/settings.local.json",
+    "mcp_servers": "~/.claude.json mcpServers + ~/.claude/.mcp.json mcpServers (merged)",
     "global_claude_md": "~/.claude/CLAUDE.md",
-    "skills": "~/.claude/skills/<name>/SKILL.md",
-    "commands": "~/.claude/commands/<name>.md"
+    "central_files": "~/Claude/<filename>.md — lab-agnostic central rules files referenced by project-local CLAUDE.md via @-import; flat name→content map",
+    "keybindings": "~/.claude/keybindings.json",
+    "statusline": "~/.config/ccstatusline/settings.json",
+    "skills_user": "~/.claude/skills/<name>/SKILL.md",
+    "skills_plugin": "~/.claude/plugins/cache/<mp>/<plugin>/<ver>/skills/<name>/SKILL.md",
+    "commands": "~/.claude/commands/<name>.md (frontmatter + body)",
+    "agents": "~/.claude/agents/<name>.md",
+    "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
+    "machine_id": "~/.claude/machine_id (one-line file)",
+    "claude_version": "subprocess `claude --version`"
   },
   "redactions_applied": {
     "secret_patterns_matched": 0,
-    "secret_keys_redacted": 0,
-    "home_paths_normalized": 0
+    "secret_keys_redacted": 1,
+    "home_paths_normalized": 11
   },
   "notes": [
     "All known API-key shapes (sk-, tvly-, ghp_, AKIA, JWT, etc.) replaced with <REDACTED:type> tokens.",
     "Object keys whose name contains api_key/token/secret/password/auth had their string values redacted.",
     "Local home paths (/Users/<you>/) normalized to ${HOME} for portability.",
-    "Slash-command and skill listings include name + description only — full body not published.",
+    "Slash-command bodies are captured (redacted). Skill bodies are NOT — only name + description.",
+    "Plugin-shipped skills are listed with source='plugin:<plugin>@<marketplace>'; user-level with source='user'.",
+    "Forward-compat fields (agents, keybindings) may be empty if those directories don't exist on this machine.",
     "If you spot anything sensitive that wasn't caught, edit this file by hand before committing."
   ]
 }
