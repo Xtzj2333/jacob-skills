@@ -22,7 +22,9 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 | `project-filename` | Per-project output filename convention `<role> [<project>].<ext>`. Invoked by `revision-queue`, `commented-edit-roundtrip`, and `citation-deepening` to resolve filenames consistently across sessions without env-vars. |
 | `tony-github-push` | Push manuscript edits to a configured remote/branch. Repo URL and branch are read from the user's CLAUDE.md or env, not hardcoded. |
 | `calendar-search` | Multi-calendar Google Calendar lookup with bilingual EN/ZH keyword expansion, chunked windows for noisy calendars, and source-timezone preservation. **Cowork-only** — Jacob does not install on Claude Code (avoids "what's on my calendar" firing in coding sessions). Skill is configured for Jacob's calendar set; fork and adapt the calendar-reference table for your own. |
+| `project-map` | Folder-orientation skill — creates and maintains `MAP.md` files at project roots so collaborators and future Claude sessions can find their way around. Handles legacy `INDEX.md` migration. |
 | `sync-cowork-skill` | Publishes a Cowork-side skill to its marketplace plugin folder with a mandatory diff + sensitive-content scan + explicit confirm gate. Cowork remains the source of truth (read-only here); GitHub is downstream. **Jacob-specific** — hardcoded to `~/jacob-skills/` as the marketplace clone path. Run from Claude Code only. |
+| `claude-env-sync` | Publishes a redacted snapshot of your Claude Code env (settings, MCP, CLAUDE.md, skills, installed plugins with version pinning, central reference files) to a git repo, then compares against another snapshot with item-by-item recommendations. **Jacob-internal** (cross-Mac sync for Jacob's setup) — published here so collaborators can also use it for their own env diffs. See [`plugins/claude-env-sync/QUICKSTART.md`](./plugins/claude-env-sync/QUICKSTART.md). |
 
 ## Install (Claude Code)
 
@@ -34,6 +36,7 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 /plugin install commented-edit-roundtrip@jacob-skills
 /plugin install revision-queue@jacob-skills
 /plugin install tony-github-push@jacob-skills
+/plugin install project-map@jacob-skills
 ```
 
 **Note for `calendar-search`:** install on Cowork only (`/plugin install calendar-search@jacob-skills` from Cowork). Skip on Claude Code unless you actually want calendar lookups firing in coding sessions.

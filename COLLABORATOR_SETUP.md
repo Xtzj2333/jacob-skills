@@ -1,6 +1,6 @@
 # Setting up Jacob's skills for collaborators
 
-**Audience.** Jacob's research collaborators (e.g., Tony) who want access to the 6 skills Jacob authors and maintains: `research-27`, `citation-deepening`, `source-quality-check`, `commented-edit-roundtrip`, `revision-queue`, `tony-github-push`.
+**Audience.** Jacob's research collaborators (e.g., Tony) who want access to the 8 collaborator-facing skills Jacob authors and maintains: `research-27`, `citation-deepening`, `source-quality-check`, `commented-edit-roundtrip`, `revision-queue`, `tony-github-push`, `calendar-search`, `project-map`.
 
 **How to use this document.** You can read it yourself and follow the steps manually, or paste this entire document into a Claude Code session and say "Follow this end-to-end and stop only at decision points marked **YOU DECIDE**."
 
@@ -8,8 +8,8 @@
 
 **Outcome by the end.**
 
-1. All 6 skills installed in your Claude Code (CLI).
-2. The same 6 skills installed in Claude Cowork (Desktop GUI), so you have parity across both surfaces.
+1. All 7 Claude Code-compatible skills installed (`calendar-search` is Cowork-only for Jacob; install on Code only if you want calendar lookups in coding sessions).
+2. All 8 collaborator-facing skills installed in Claude Cowork (Desktop GUI), so you have parity across both surfaces.
 3. `/focus` mode enabled in Claude Code.
 4. Your own configuration values (if you push to a manuscript repo, the `tony-github-push` values) set in your global CLAUDE.md.
 5. A clear update workflow: when Jacob pushes new versions of his skills, you pull them with one command on each surface.
@@ -37,7 +37,7 @@ The only reliable cross-surface sync mechanism (for personal Anthropic plans, as
 
 ## Part 1 — Install jacob-skills in Claude Code
 
-Jacob's skills are bundled as 6 plugins in a public marketplace at `Xtzj2333/jacob-skills`.
+Jacob's collaborator-facing skills are bundled as 8 plugins in a public marketplace at `Xtzj2333/jacob-skills`. You'll install 7 of them in Claude Code (`calendar-search` is Cowork-only — see Part 2).
 
 ### 1.1 Add the marketplace
 
@@ -62,7 +62,10 @@ Run each command on its own line. Do **not** paste them as a single block — Cl
 /plugin install commented-edit-roundtrip@jacob-skills
 /plugin install revision-queue@jacob-skills
 /plugin install tony-github-push@jacob-skills
+/plugin install project-map@jacob-skills
 ```
+
+**Optional eighth:** `/plugin install calendar-search@jacob-skills` — Jacob keeps this on Cowork only so calendar lookups don't fire mid-coding-session. Install on Claude Code only if you actually want that behavior.
 
 Each install opens a small interactive scope picker. **Pick "User scope"** (the default — applies across all your projects, lives in `~/.claude/plugins/`).
 
@@ -99,7 +102,7 @@ Cowork's plugin registry is **separate** from Claude Code's. You install separat
 4. Paste: `Xtzj2333/jacob-skills` (Cowork's UI accepts the `owner/repo` shorthand here, unlike Claude Code).
 5. Confirm.
 
-The marketplace will appear and you'll see all 6 plugins listed.
+The marketplace will appear and you'll see all jacob-skills plugins listed (currently 11; you'll install the 8 collaborator-facing ones below).
 
 ### 2.3 Install each plugin
 
@@ -111,6 +114,8 @@ For each of these, click the `+` button to install:
 - commented-edit-roundtrip
 - revision-queue
 - tony-github-push
+- calendar-search
+- project-map
 
 You'll see each appear under **Personal plugins** in the left sidebar.
 
@@ -245,9 +250,9 @@ Jacob's skills are maintained at `Xtzj2333/jacob-skills` on GitHub. Collaborator
 When you're done, all of the below should be true:
 
 - [ ] In Claude Code, `/plugin marketplace list` shows `jacob-skills`
-- [ ] In Claude Code, `/plugin list` shows 6 installed plugins from `jacob-skills`
+- [ ] In Claude Code, `/plugin list` shows 7 installed plugins from `jacob-skills` (8 if you opted into `calendar-search`)
 - [ ] In Claude Code, typing `/research-27` offers autocomplete and runs the skill
-- [ ] In Cowork, Customize → Personal plugins lists all 6 skills under `jacob-skills`
+- [ ] In Cowork, Customize → Personal plugins lists all 8 skills under `jacob-skills`
 - [ ] In a fresh Cowork chat, "research 27 something" actually fires research-27
 - [ ] `~/.claude/CLAUDE.md` has your manuscript-push values, if applicable (no `USER_NAME` needed — retired 2026-05-10)
 - [ ] `/focus` mode is enabled in Claude Code
@@ -289,4 +294,4 @@ When you're done, all of the below should be true:
 
 ---
 
-*Document maintained by Jacob. Suggestions welcome via GitHub issues at `https://github.com/Xtzj2333/jacob-skills/issues` or PRs from a fork. Last updated: 2026-05-09.*
+*Document maintained by Jacob. Suggestions welcome via GitHub issues at `https://github.com/Xtzj2333/jacob-skills/issues` or PRs from a fork. Last updated: 2026-05-12.*

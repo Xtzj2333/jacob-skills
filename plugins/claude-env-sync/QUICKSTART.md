@@ -62,7 +62,7 @@ In a Claude Code session, say:
 Your Claude will:
 1. Auto-detect or ask for your snapshot identifier (your name, lowercased).
 2. Auto-detect or ask for your local snapshot repo (the one you cloned in step 2).
-3. Run the publisher script. It captures `~/.claude/settings.json`, the `mcpServers` block from `~/.claude.json`, your global `~/.claude/CLAUDE.md`, and your installed skills + commands. Secrets get redacted.
+3. Run the publisher script (snapshot format v0.3). It captures: `~/.claude/settings.json` + `settings.local.json`, the merged `mcpServers` block from `~/.claude.json` + `~/.claude/.mcp.json`, your global `~/.claude/CLAUDE.md`, installed user skills + plugin-shipped skills (so the diff knows which is which), slash command bodies, agents, keybindings, statusline config, `~/.claude/plugins/installed_plugins.json` (per-plugin version + git SHA, so version drift is visible), and central reference files under `~/Claude/` (e.g., `manuscript-rules.md`). Secrets get redacted.
 4. **Show you the redacted snapshot.** Eyeball it for any leaked keys or paths. The publisher also runs a defense-in-depth grep before commit.
 5. Ask for your OK to commit + push.
 
@@ -92,7 +92,7 @@ Your Claude will:
 
 1. Fetch their snapshot.
 2. Read your local environment.
-3. Compute the diff (theirs-only / yours-only / both-different across hooks, MCP servers, settings, skills, commands, CLAUDE.md).
+3. Compute the diff (theirs-only / yours-only / both-different across hooks, MCP servers, settings, settings.local, statusline, keybindings, user skills, plugin-shipped skills, command bodies, agents, CLAUDE.md, installed plugins with version pinning, and central reference files).
 4. Open an HTML diff report in your browser.
 5. **Walk you through each diff item — with active judgment.** For every conflict, your Claude reads both versions, forms a reasoned opinion (which is more rigorous? more conservative? better-engineered for your context?) and recommends an action with a one-sentence rationale.
 6. Apply only items you confirm. Backs up your prior config before any write.
