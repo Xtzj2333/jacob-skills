@@ -2,11 +2,18 @@
 """
 compare_env.py — diff a published environment snapshot against the local one.
 
-v0.2 reads matching v0.2 publisher: now compares settings.local.json,
-statusline config, plugin-shipped skills, command BODIES, agents, keybindings,
-and the merged ~/.claude.json + ~/.claude/.mcp.json mcp_servers.
+v0.4 adds:
+  - user skill BODY diff (SKILL.md text + bundled file list per skill)
+  - external CLI inventory diff (`uv tool list`, `brew leaves`) so missing
+    binaries that MCP servers depend on show up with an install hint.
 
-Backward-compatible: when a snapshot lacks a v0.2 field, treat it as empty.
+v0.3 added installed-plugin version-pinning diff and central files
+(~/Claude/manuscript-rules.md).
+
+v0.2 added: settings.local.json, statusline, plugin-shipped skills, command
+BODIES, agents, keybindings, and merged mcp_servers.
+
+Backward-compatible: snapshots without a given field are treated as empty.
 
 Usage:
   compare_env.py --snapshot snapshots/jacob_jz1.json
@@ -199,6 +206,137 @@ def list_commands(commands_dir: Path) -> list[dict]:
     return out
 
 
+# --- Skill body capture (mirrors publish_snapshot.py for self-compare) -----
+
+SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
+SKILL_BUNDLE_TOTAL_MAX_BYTES = 500 * 1024
+SKILL_BUNDLE_TEXT_EXTENSIONS = {
+    ".md", ".sh", ".py", ".json", ".yaml", ".yml", ".txt", ".toml", ".cfg",
+    ".html", ".css", ".js", ".ts", ".sql", ".tex", ".bib", ".csv", ".tsv",
+    ".rb", ".pl", ".r",
+}
+THIRD_PARTY_SKILL_MARKERS = {
+    "LICENSE", "LICENSE.md", "LICENSE.txt",
+    "package.json", "package-lock.json",
+    "pyproject.toml", "uv.lock", "Cargo.toml",
+    "CHANGELOG.md",
+}
+SKILL_BODY_OPTOUT_FILE = ".envsync-skip-body"
+
+
+def list_user_skill_bodies(skills_dir: Path) -> list[dict]:
+    """Mirror of publish_snapshot.list_user_skill_bodies — produces the same shape
+    so theirs-vs-mine body diffing is apples-to-apples after redaction."""
+    if not skills_dir.is_dir():
+        return []
+    out = []
+    for entry in sorted(skills_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        skill_md_path = entry / "SKILL.md"
+        if not skill_md_path.exists():
+            continue
+        try:
+            skill_md_text = skill_md_path.read_text(errors="replace")
+        except Exception:
+            continue
+        skill_md_redacted = _normalize_home(_redact_string(skill_md_text))
+
+        bundle_status = "captured"
+        if (entry / SKILL_BODY_OPTOUT_FILE).exists():
+            bundle_status = "skipped:opted_out"
+        else:
+            for marker in THIRD_PARTY_SKILL_MARKERS:
+                if (entry / marker).exists():
+                    bundle_status = f"skipped:third_party_marker:{marker}"
+                    break
+
+        files: list[dict] = []
+        skipped: list[dict] = []
+        if bundle_status == "captured":
+            total_bytes = 0
+            oversize_total = False
+            for fp in sorted(entry.rglob("*")):
+                if not fp.is_file() or fp == skill_md_path:
+                    continue
+                rel = fp.relative_to(entry).as_posix()
+                ext = fp.suffix.lower()
+                try:
+                    size = fp.stat().st_size
+                except OSError:
+                    continue
+                if size > SKILL_BUNDLE_FILE_MAX_BYTES:
+                    skipped.append({"path": rel, "reason": "too_large", "bytes": size})
+                    continue
+                if ext not in SKILL_BUNDLE_TEXT_EXTENSIONS:
+                    try:
+                        fp.read_bytes()[:4096].decode("utf-8")
+                    except (UnicodeDecodeError, OSError):
+                        skipped.append({"path": rel, "reason": "binary", "bytes": size})
+                        continue
+                try:
+                    txt = fp.read_text(errors="replace")
+                except Exception as e:
+                    skipped.append({"path": rel, "reason": f"read_error:{e}"})
+                    continue
+                txt_redacted = _normalize_home(_redact_string(txt))
+                files.append({"path": rel, "content": txt_redacted, "bytes": size})
+                total_bytes += size
+                if total_bytes > SKILL_BUNDLE_TOTAL_MAX_BYTES:
+                    oversize_total = True
+                    break
+            if oversize_total:
+                bundle_status = "skipped:total_size_exceeded"
+                files = []
+                skipped = []
+
+        out.append({
+            "name": entry.name,
+            "skill_md": skill_md_redacted,
+            "bundle_status": bundle_status,
+            "files": files,
+            "skipped": skipped,
+        })
+    return out
+
+
+def capture_external_cli_inventory() -> dict:
+    """Mirror of publish_snapshot.capture_external_cli_inventory — same shape so
+    self-compare matches."""
+    import subprocess as _sp
+    CLI_INVENTORY_MAX_BYTES = 16 * 1024
+    out: dict = {
+        "captured_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "uv_tool_list": None,
+        "brew_leaves": None,
+        "notes": [],
+    }
+
+    def run_safely(cmd, label):
+        try:
+            r = _sp.run(cmd, capture_output=True, text=True, timeout=10)
+        except FileNotFoundError:
+            out["notes"].append(f"{label}: {cmd[0]} not installed on this machine")
+            return None
+        except _sp.TimeoutExpired:
+            out["notes"].append(f"{label}: timed out after 10s")
+            return None
+        except Exception as e:
+            out["notes"].append(f"{label}: error {e!r}")
+            return None
+        if r.returncode != 0:
+            out["notes"].append(f"{label}: exit {r.returncode}")
+            return None
+        txt = r.stdout or ""
+        if len(txt.encode("utf-8")) > CLI_INVENTORY_MAX_BYTES:
+            txt = txt[:CLI_INVENTORY_MAX_BYTES] + "\n# ...truncated\n"
+        return (txt.rstrip() + "\n") if txt else ""
+
+    out["uv_tool_list"] = run_safely(["uv", "tool", "list"], "uv_tool_list")
+    out["brew_leaves"] = run_safely(["brew", "leaves"], "brew_leaves")
+    return out
+
+
 def list_agents(agents_dir: Path) -> list[dict]:
     if not agents_dir.is_dir():
         return []
@@ -234,10 +372,12 @@ def read_local_env() -> dict:
         "keybindings": keybindings,
         "statusline": statusline,
         "skills_user": list_skills(home / ".claude" / "skills", source_label="user"),
+        "skills_user_bodies": list_user_skill_bodies(home / ".claude" / "skills"),
         "skills_plugin": list_plugin_shipped_skills(home),
         "commands": list_commands(home / ".claude" / "commands"),
         "agents": list_agents(home / ".claude" / "agents"),
         "installed_plugins": read_json_safe(home / ".claude" / "plugins" / "installed_plugins.json") or {},
+        "external_clis": capture_external_cli_inventory(),
     }
     # Apply publisher's redaction + home-normalization so self-compare is clean.
     # (Without this, every redacted secret and every absolute path shows as a "diff".)
@@ -424,6 +564,114 @@ def diff_central_files(theirs: dict, mine: dict) -> dict:
     return out
 
 
+def diff_skill_bodies(theirs: list[dict], mine: list[dict]) -> dict:
+    """Diff user skill BODIES (added in v0.4).
+    Pairs by skill name and reports SKILL.md identity + bundle-file divergence."""
+    t = {x["name"]: x for x in (theirs or []) if "name" in x}
+    m = {x["name"]: x for x in (mine or []) if "name" in x}
+    only_theirs = []
+    only_mine = []
+    both_same = []
+    both_diff = []
+    for name in sorted(set(t.keys()) | set(m.keys())):
+        if name in t and name not in m:
+            only_theirs.append({
+                "name": name,
+                "bundle_status": t[name].get("bundle_status"),
+                "skill_md_chars": len(t[name].get("skill_md", "")),
+                "bundle_files": len(t[name].get("files", [])),
+            })
+        elif name in m and name not in t:
+            only_mine.append({
+                "name": name,
+                "bundle_status": m[name].get("bundle_status"),
+                "skill_md_chars": len(m[name].get("skill_md", "")),
+                "bundle_files": len(m[name].get("files", [])),
+            })
+        else:
+            tt, mm = t[name], m[name]
+            t_md = tt.get("skill_md", "")
+            m_md = mm.get("skill_md", "")
+            t_files = {f["path"]: f for f in tt.get("files", [])}
+            m_files = {f["path"]: f for f in mm.get("files", [])}
+            files_only_theirs = sorted(set(t_files) - set(m_files))
+            files_only_mine = sorted(set(m_files) - set(t_files))
+            files_both_diff = sorted(
+                p for p in set(t_files) & set(m_files)
+                if t_files[p].get("content") != m_files[p].get("content")
+            )
+            md_same = (t_md == m_md)
+            if md_same and not (files_only_theirs or files_only_mine or files_both_diff):
+                both_same.append(name)
+            else:
+                both_diff.append({
+                    "name": name,
+                    "skill_md_same": md_same,
+                    "theirs_skill_md_chars": len(t_md),
+                    "mine_skill_md_chars": len(m_md),
+                    "theirs_skill_md": t_md if not md_same else None,
+                    "mine_skill_md": m_md if not md_same else None,
+                    "files_only_theirs": files_only_theirs,
+                    "files_only_mine": files_only_mine,
+                    "files_both_diff": files_both_diff,
+                    "theirs_bundle_status": tt.get("bundle_status"),
+                    "mine_bundle_status": mm.get("bundle_status"),
+                })
+    return {
+        "only_theirs": only_theirs,
+        "only_mine": only_mine,
+        "both_same": both_same,
+        "both_diff": both_diff,
+    }
+
+
+def _parse_uv_tool_list(txt: str | None) -> set[str]:
+    """Parse `uv tool list` output into a set of tool names.
+    Lines look like 'mcp-youtube-transcript v0.3.5' followed by indented entry points."""
+    if not txt:
+        return set()
+    names = set()
+    for line in txt.splitlines():
+        if not line or line[0] in " \t-":
+            continue
+        # First whitespace-separated token is the tool name.
+        first = line.strip().split(None, 1)[0]
+        if first:
+            names.add(first)
+    return names
+
+
+def _parse_brew_leaves(txt: str | None) -> set[str]:
+    """Parse `brew leaves` output (one formula per line, possibly tap-qualified)."""
+    if not txt:
+        return set()
+    return {ln.strip() for ln in txt.splitlines() if ln.strip()}
+
+
+def diff_external_clis(theirs: dict, mine: dict) -> dict:
+    """Diff external CLI inventories. Surfaces tools present on theirs but not
+    on mine — these are likely things MCP servers / hooks depend on that the
+    receiving machine needs to install separately."""
+    t = theirs or {}
+    m = mine or {}
+    t_uv = _parse_uv_tool_list(t.get("uv_tool_list"))
+    m_uv = _parse_uv_tool_list(m.get("uv_tool_list"))
+    t_brew = _parse_brew_leaves(t.get("brew_leaves"))
+    m_brew = _parse_brew_leaves(m.get("brew_leaves"))
+    return {
+        "uv_only_theirs": sorted(t_uv - m_uv),
+        "uv_only_mine": sorted(m_uv - t_uv),
+        "uv_both": sorted(t_uv & m_uv),
+        "brew_only_theirs": sorted(t_brew - m_brew),
+        "brew_only_mine": sorted(m_brew - t_brew),
+        "brew_both": sorted(t_brew & m_brew),
+        "theirs_captured": t.get("uv_tool_list") is not None or t.get("brew_leaves") is not None,
+        "mine_captured": m.get("uv_tool_list") is not None or m.get("brew_leaves") is not None,
+        "theirs_notes": t.get("notes", []),
+        "mine_notes": m.get("notes", []),
+    }
+
+
 def build_diff(snapshot: dict, local: dict) -> dict:
     env_t = snapshot.get("environment", {})
     env_m = local
@@ -489,6 +737,14 @@ def build_diff(snapshot: dict, local: dict) -> dict:
             env_t.get("installed_plugins", {}) or {},
             env_m.get("installed_plugins", {}) or {},
         ),
+        "skills_user_bodies": diff_skill_bodies(
+            env_t.get("skills_user_bodies", []),
+            env_m.get("skills_user_bodies", []),
+        ),
+        "external_clis": diff_external_clis(
+            env_t.get("external_clis", {}) or {},
+            env_m.get("external_clis", {}) or {},
+        ),
     }
 
     s = diff["summary_counts"]
@@ -520,6 +776,16 @@ def build_diff(snapshot: dict, local: dict) -> dict:
     s["plugins_version_diff"] = len(ip["version_diff"])
     s["plugins_sha_only_diff"] = len(ip["sha_only_diff"])
     s["plugins_same"] = len(ip["same"])
+    sb = diff["skills_user_bodies"]
+    s["skill_bodies_only_in_theirs"] = len(sb["only_theirs"])
+    s["skill_bodies_only_in_mine"] = len(sb["only_mine"])
+    s["skill_bodies_diverged"] = len(sb["both_diff"])
+    s["skill_bodies_same"] = len(sb["both_same"])
+    ec = diff["external_clis"]
+    s["uv_tools_only_in_theirs"] = len(ec["uv_only_theirs"])
+    s["uv_tools_only_in_mine"] = len(ec["uv_only_mine"])
+    s["brew_only_in_theirs"] = len(ec["brew_only_theirs"])
+    s["brew_only_in_mine"] = len(ec["brew_only_mine"])
     return diff
 
 
@@ -609,6 +875,18 @@ def render_html(diff: dict) -> str:
         f"{s.get('plugins_sha_only_diff', 0)} sha-only-diff · "
         f"{s.get('plugins_only_in_theirs', 0)} only theirs · "
         f"{s.get('plugins_only_in_mine', 0)} only yours</li>"
+    )
+    parts.append(
+        f"<li>Skill bodies (v0.4): "
+        f"{s.get('skill_bodies_same', 0)} identical · "
+        f"{s.get('skill_bodies_diverged', 0)} diverged · "
+        f"{s.get('skill_bodies_only_in_theirs', 0)} only theirs · "
+        f"{s.get('skill_bodies_only_in_mine', 0)} only yours</li>"
+    )
+    parts.append(
+        f"<li>External CLIs (v0.4): "
+        f"<code>uv</code> {s.get('uv_tools_only_in_theirs', 0)} only-theirs / {s.get('uv_tools_only_in_mine', 0)} only-yours · "
+        f"<code>brew</code> {s.get('brew_only_in_theirs', 0)} only-theirs / {s.get('brew_only_in_mine', 0)} only-yours</li>"
     )
     parts.append("</ul></div>")
 
@@ -850,6 +1128,83 @@ def render_html(diff: dict) -> str:
     if not (ip["only_theirs"] or ip["only_mine"] or ip["version_diff"] or ip["sha_only_diff"] or ip["same"]):
         parts.append("<p class='muted'>No installed-plugins data on either side "
                      "(snapshot may be v0.1 or v0.2 — capture added in v0.3).</p>")
+
+    # User skill BODIES (v0.4)
+    parts.append("<h2>User skill bodies (SKILL.md + bundled files)</h2>")
+    sb = diff.get("skills_user_bodies", {"only_theirs": [], "only_mine": [], "both_same": [], "both_diff": []})
+    if not (sb["only_theirs"] or sb["only_mine"] or sb["both_diff"] or sb["both_same"]):
+        parts.append("<p class='muted'>No skill bodies in the snapshot — that snapshot may be v0.3 or earlier "
+                     "(skill-body capture was added in v0.4). Re-publish to surface this section.</p>")
+    else:
+        if sb["only_theirs"]:
+            parts.append("<div class='theirs-only'><strong>Only in theirs — paste these into <code>~/.claude/skills/&lt;name&gt;/</code> to acquire:</strong><ul>")
+            for x in sb["only_theirs"]:
+                parts.append(
+                    f"<li><code>{x['name']}</code> — SKILL.md {x['skill_md_chars']} chars, "
+                    f"{x['bundle_files']} bundle files (status: <code>{x.get('bundle_status','?')}</code>). "
+                    f"Body in JSON diff under <code>skills_user_bodies.only_theirs</code>.</li>"
+                )
+            parts.append("</ul></div>")
+        if sb["only_mine"]:
+            parts.append("<div class='mine-only'><strong>Only in yours:</strong><ul>")
+            for x in sb["only_mine"]:
+                parts.append(f"<li><code>{x['name']}</code> ({x['skill_md_chars']} chars)</li>")
+            parts.append("</ul></div>")
+        if sb["both_diff"]:
+            parts.append("<div class='both-diff'><strong>In both, content diverged:</strong>")
+            for x in sb["both_diff"]:
+                parts.append(f"<h3>{x['name']}</h3>")
+                bits = []
+                if not x["skill_md_same"]:
+                    bits.append(f"SKILL.md differs (theirs {x['theirs_skill_md_chars']} vs yours {x['mine_skill_md_chars']} chars)")
+                if x["files_only_theirs"]:
+                    bits.append(f"<span class='tag t'>only theirs:</span> <code>{', '.join(x['files_only_theirs'])}</code>")
+                if x["files_only_mine"]:
+                    bits.append(f"<span class='tag m'>only yours:</span> <code>{', '.join(x['files_only_mine'])}</code>")
+                if x["files_both_diff"]:
+                    bits.append(f"<span class='tag b'>content differs:</span> <code>{', '.join(x['files_both_diff'])}</code>")
+                parts.append("<p>" + " · ".join(bits) + "</p>")
+                if not x["skill_md_same"]:
+                    parts.append("<div class='col'><div class='label'>Theirs SKILL.md (first 1200 chars)</div>")
+                    parts.append(html_pre((x.get("theirs_skill_md") or "")[:1200]))
+                    parts.append("</div><div class='col'><div class='label'>Yours SKILL.md (first 1200 chars)</div>")
+                    parts.append(html_pre((x.get("mine_skill_md") or "")[:1200]))
+                    parts.append("</div>")
+            parts.append("</div>")
+        if sb["both_same"]:
+            parts.append(f"<p class='muted'>Identical bodies: <code>{', '.join(sb['both_same'])}</code></p>")
+
+    # External CLI inventory (v0.4)
+    parts.append("<h2>External command-line tools (uv + brew)</h2>")
+    ec = diff.get("external_clis", {})
+    if not ec or (not ec.get("theirs_captured") and not ec.get("mine_captured")):
+        parts.append("<p class='muted'>No external-CLI capture in either snapshot "
+                     "(snapshot may be v0.3 or earlier — added in v0.4).</p>")
+    else:
+        if ec["uv_only_theirs"]:
+            parts.append("<div class='theirs-only'><strong>uv tools their machine has, yours doesn't — likely MCP-server dependencies:</strong><ul>")
+            for name in ec["uv_only_theirs"]:
+                parts.append(f"<li><code>{name}</code> — install on your machine: <code>uv tool install {name}</code></li>")
+            parts.append("</ul></div>")
+        if ec["brew_only_theirs"]:
+            parts.append("<div class='theirs-only'><strong>brew formulas their machine has, yours doesn't:</strong><ul>")
+            for name in ec["brew_only_theirs"]:
+                parts.append(f"<li><code>{name}</code> — install: <code>brew install {name}</code></li>")
+            parts.append("</ul></div>")
+        if ec["uv_only_mine"] or ec["brew_only_mine"]:
+            parts.append("<div class='mine-only'><strong>You have, theirs doesn't:</strong> ")
+            mine_bits = []
+            if ec["uv_only_mine"]:
+                mine_bits.append("uv: " + ", ".join(f"<code>{n}</code>" for n in ec["uv_only_mine"]))
+            if ec["brew_only_mine"]:
+                mine_bits.append("brew: " + ", ".join(f"<code>{n}</code>" for n in ec["brew_only_mine"]))
+            parts.append(" · ".join(mine_bits))
+            parts.append("</div>")
+        if not (ec["uv_only_theirs"] or ec["uv_only_mine"] or ec["brew_only_theirs"] or ec["brew_only_mine"]):
+            parts.append("<p>External CLI inventories match. ✓</p>")
+        if ec.get("theirs_notes") or ec.get("mine_notes"):
+            parts.append("<p class='muted'>Capture notes (e.g. missing uv/brew on one side): "
+                         f"theirs={ec.get('theirs_notes', [])}, yours={ec.get('mine_notes', [])}</p>")
 
     # CLAUDE.md
     parts.append("<h2>Global CLAUDE.md</h2>")

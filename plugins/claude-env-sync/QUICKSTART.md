@@ -62,7 +62,7 @@ In a Claude Code session, say:
 Your Claude will:
 1. Auto-detect or ask for your snapshot identifier (your name, lowercased).
 2. Auto-detect or ask for your local snapshot repo (the one you cloned in step 2).
-3. Run the publisher script (snapshot format v0.3). It captures: `~/.claude/settings.json` + `settings.local.json`, the merged `mcpServers` block from `~/.claude.json` + `~/.claude/.mcp.json`, your global `~/.claude/CLAUDE.md`, installed user skills + plugin-shipped skills (so the diff knows which is which), slash command bodies, agents, keybindings, statusline config, `~/.claude/plugins/installed_plugins.json` (per-plugin version + git SHA, so version drift is visible), and central reference files under `~/Claude/` (e.g., `manuscript-rules.md`). Secrets get redacted.
+3. Run the publisher script (snapshot format v0.4). It captures: `~/.claude/settings.json` + `settings.local.json`, the merged `mcpServers` block from `~/.claude.json` + `~/.claude/.mcp.json`, your global `~/.claude/CLAUDE.md`, installed user skills with full SKILL.md + bundled-file content (`~/.claude/skills/<name>/` — third-party skills with a `LICENSE` or `pyproject.toml` keep the SKILL.md but skip the bundle, since they should be installed the upstream way), plugin-shipped skills (metadata only — the bodies travel via the marketplace), slash command bodies, agents, keybindings, statusline config, `~/.claude/plugins/installed_plugins.json` (per-plugin version + git SHA), central reference files under `~/Claude/` (e.g., `manuscript-rules.md`), and an external CLI inventory (`uv tool list` + `brew leaves`) so the diff can flag missing binaries that MCP servers depend on. Secrets get redacted.
 4. **Show you the redacted snapshot.** Eyeball it for any leaked keys or paths. The publisher also runs a defense-in-depth grep before commit.
 5. Ask for your OK to commit + push.
 
@@ -92,7 +92,7 @@ Your Claude will:
 
 1. Fetch their snapshot.
 2. Read your local environment.
-3. Compute the diff (theirs-only / yours-only / both-different across hooks, MCP servers, settings, settings.local, statusline, keybindings, user skills, plugin-shipped skills, command bodies, agents, CLAUDE.md, installed plugins with version pinning, and central reference files).
+3. Compute the diff (theirs-only / yours-only / both-different across hooks, MCP servers, settings, settings.local, statusline, keybindings, user skills *with body-level diffs* including bundled scripts/templates, plugin-shipped skills, command bodies, agents, CLAUDE.md, installed plugins with version pinning, central reference files, and external CLI inventory — flagging tools their machine has via `uv` or `brew` that yours doesn't).
 4. Open an HTML diff report in your browser.
 5. **Walk you through each diff item — with active judgment.** For every conflict, your Claude reads both versions, forms a reasoned opinion (which is more rigorous? more conservative? better-engineered for your context?) and recommends an action with a one-sentence rationale.
 6. Apply only items you confirm. Backs up your prior config before any write.
@@ -135,6 +135,8 @@ Your snapshot has all keys redacted (Tavily, OpenAI, GitHub PATs, Anthropic, Bea
 - `~/.claude.json` runtime state (sessions, OAuth tokens, internal counters).
 - Secrets — by design.
 - Plugin SOURCE CODE — but if your collaborator publishes a plugin you want, you install via `/plugin install <plugin>@<their-marketplace>`. That's separate from env-sync.
+- **External CLI binaries themselves.** The snapshot tells you *which* tools the other machine has (via `uv tool list` / `brew leaves`), and the diff shows the install commands — but you still run `uv tool install <name>` or `brew install <name>` on your machine to actually acquire them.
+- **Third-party skill internals.** Skills whose folder contains `LICENSE` / `pyproject.toml` / `package.json` etc. are flagged as third-party — only their `SKILL.md` is captured, not the implementation files. Install third-party skills the upstream way (git clone, npm install, etc.).
 
 **Q: Can I undo an import?**
 Every import creates a backup at `~/.claude/_pre_env_compare_backup/<timestamp>/`. Restore with `cp <BACKUP_DIR>/settings.json ~/.claude/settings.json`.

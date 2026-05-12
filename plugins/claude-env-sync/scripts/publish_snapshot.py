@@ -2,17 +2,22 @@
 """
 publish_snapshot.py — capture a redacted snapshot of a Claude Code environment.
 
-v0.2 captures (in addition to v0.1):
-  - ~/.claude/.mcp.json (project-style MCP config; merged with ~/.claude.json mcpServers)
-  - ~/.claude/settings.local.json (local-only permissions)
-  - ~/.config/ccstatusline/settings.json (status line config)
-  - ~/.claude/keybindings.json (forward-compat)
-  - ~/.claude/agents/*.md (forward-compat)
-  - claude --version (best-effort)
+v0.4 adds (on top of v0.3):
+  - User skill BODIES (full SKILL.md + bundled files under ~/.claude/skills/<name>/)
+    so personal skills actually transfer, not just their names.
+  - External CLI inventory (best-effort `uv tool list` + `brew leaves`)
+    so the diff can surface "their MCP server needs tool X — install it via Y"
+    instead of silently importing a broken config.
+
+v0.3 adds (on top of v0.2):
+  - ~/.claude/plugins/installed_plugins.json (per-plugin version + git SHA)
+  - Central reference files under ~/Claude/ (e.g. manuscript-rules.md)
+
+v0.2 added (on top of v0.1):
+  - ~/.claude/.mcp.json, settings.local.json, ccstatusline, keybindings, agents
   - command BODIES, not just descriptions
-  - plugin-shipped skills (so the diff knows the difference between
-    "user skill at ~/.claude/skills/X" vs "plugin skill from <plugin>")
-  - machine_id (read from ~/.claude/machine_id, or via --machine-id arg)
+  - plugin-shipped skills (vs user skills)
+  - machine_id
 
 Usage:
   publish_snapshot.py --owner jacob --machine-id main --out snapshots/jacob_main.json
@@ -36,7 +41,32 @@ from pathlib import Path
 
 # --- Snapshot format version ------------------------------------------------
 
-SNAPSHOT_FORMAT_VERSION = "0.3.0"
+SNAPSHOT_FORMAT_VERSION = "0.4.0"
+
+# Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
+SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
+# Cap total per-skill bundle bytes; over this we skip the bundle but keep SKILL.md.
+SKILL_BUNDLE_TOTAL_MAX_BYTES = 500 * 1024
+# Cap CLI inventory output to ~16KB each.
+CLI_INVENTORY_MAX_BYTES = 16 * 1024
+# File extensions whose body we capture inside a skill bundle (text-only allowlist).
+SKILL_BUNDLE_TEXT_EXTENSIONS = {
+    ".md", ".sh", ".py", ".json", ".yaml", ".yml", ".txt", ".toml", ".cfg",
+    ".html", ".css", ".js", ".ts", ".sql", ".tex", ".bib", ".csv", ".tsv",
+    ".rb", ".pl", ".r",
+}
+# If a skill root has ANY of these marker files, treat it as a third-party skill
+# whose body should NOT be synced (the receiving machine should install it
+# the upstream way: git clone, npm install, etc.).
+THIRD_PARTY_SKILL_MARKERS = {
+    "LICENSE", "LICENSE.md", "LICENSE.txt",
+    "package.json", "package-lock.json",
+    "pyproject.toml", "uv.lock", "Cargo.toml",
+    "CHANGELOG.md",
+}
+# Explicit per-skill opt-out: drop a file named this at the skill root to keep
+# its body out of snapshots.
+SKILL_BODY_OPTOUT_FILE = ".envsync-skip-body"
 
 # --- Redaction patterns -----------------------------------------------------
 
@@ -310,6 +340,155 @@ def list_agents(agents_dir: Path) -> list[dict]:
     return out
 
 
+def list_user_skill_bodies(skills_dir: Path, stats: dict) -> list[dict]:
+    """
+    For each user skill at ~/.claude/skills/<name>/, capture the full SKILL.md text
+    plus bundled text files. Third-party skills (those with LICENSE / pyproject.toml /
+    etc. at the root) keep their SKILL.md but their bundle is skipped — installing
+    them on a new machine should follow the upstream path, not env-sync.
+
+    Returns a list of dicts shaped like:
+        {
+          "name": "html-review-builder",
+          "skill_md": "<full redacted text>",
+          "bundle_status": "captured" | "skipped:<reason>",
+          "files": [{"path": ..., "content": ..., "bytes": int}, ...],
+          "skipped": [{"path": ..., "reason": ..., "bytes": int}, ...],
+        }
+
+    Plugin-shipped skills (under ~/.claude/plugins/cache/...) are NOT included here —
+    they transfer via the marketplace.
+    """
+    if not skills_dir.is_dir():
+        return []
+    out = []
+    for entry in sorted(skills_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        skill_md_path = entry / "SKILL.md"
+        if not skill_md_path.exists():
+            continue
+        try:
+            skill_md_text = skill_md_path.read_text(errors="replace")
+        except Exception as e:
+            print(f"WARN: could not read {skill_md_path}: {e}", file=sys.stderr)
+            continue
+        skill_md_redacted = redact_string(skill_md_text, stats)
+        skill_md_redacted = normalize_home(skill_md_redacted, stats)
+
+        # Decide whether to skip bundle capture entirely.
+        bundle_status = "captured"
+        if (entry / SKILL_BODY_OPTOUT_FILE).exists():
+            bundle_status = "skipped:opted_out"
+        else:
+            for marker in THIRD_PARTY_SKILL_MARKERS:
+                if (entry / marker).exists():
+                    bundle_status = f"skipped:third_party_marker:{marker}"
+                    break
+
+        files: list[dict] = []
+        skipped: list[dict] = []
+
+        if bundle_status == "captured":
+            total_bytes = 0
+            oversize_total = False
+            for fp in sorted(entry.rglob("*")):
+                if not fp.is_file():
+                    continue
+                if fp == skill_md_path:
+                    continue
+                rel = fp.relative_to(entry).as_posix()
+                ext = fp.suffix.lower()
+                try:
+                    size = fp.stat().st_size
+                except OSError:
+                    continue
+                if size > SKILL_BUNDLE_FILE_MAX_BYTES:
+                    skipped.append({"path": rel, "reason": "too_large", "bytes": size})
+                    continue
+                if ext not in SKILL_BUNDLE_TEXT_EXTENSIONS:
+                    try:
+                        sample = fp.read_bytes()[:4096]
+                        sample.decode("utf-8")
+                    except (UnicodeDecodeError, OSError):
+                        skipped.append({"path": rel, "reason": "binary", "bytes": size})
+                        continue
+                try:
+                    txt = fp.read_text(errors="replace")
+                except Exception as e:
+                    skipped.append({"path": rel, "reason": f"read_error:{e}"})
+                    continue
+                txt_redacted = redact_string(txt, stats)
+                txt_redacted = normalize_home(txt_redacted, stats)
+                files.append({"path": rel, "content": txt_redacted, "bytes": size})
+                total_bytes += size
+                if total_bytes > SKILL_BUNDLE_TOTAL_MAX_BYTES:
+                    oversize_total = True
+                    break
+            if oversize_total:
+                bundle_status = "skipped:total_size_exceeded"
+                files = []
+                skipped = []
+
+        out.append({
+            "name": entry.name,
+            "skill_md": skill_md_redacted,
+            "bundle_status": bundle_status,
+            "files": files,
+            "skipped": skipped,
+        })
+    return out
+
+
+def capture_external_cli_inventory() -> dict:
+    """
+    Best-effort capture of externally-installed command-line tools that MCP servers,
+    hooks, and statuslines may shell out to.
+
+    These don't live in any Claude config, so without capturing them the snapshot
+    can be imported on a fresh machine and the MCP server fails silently because
+    the binary isn't installed.
+
+    Returns:
+        {
+          "uv_tool_list": "<stdout>" | None,
+          "brew_leaves": "<stdout>" | None,
+          "captured_at": "<iso utc>",
+          "notes": [...],
+        }
+    """
+    out: dict = {
+        "captured_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "uv_tool_list": None,
+        "brew_leaves": None,
+        "notes": [],
+    }
+
+    def run_safely(cmd: list[str], label: str) -> str | None:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except FileNotFoundError:
+            out["notes"].append(f"{label}: {cmd[0]} not installed on this machine")
+            return None
+        except subprocess.TimeoutExpired:
+            out["notes"].append(f"{label}: timed out after 10s")
+            return None
+        except Exception as e:
+            out["notes"].append(f"{label}: error {e!r}")
+            return None
+        if r.returncode != 0:
+            out["notes"].append(f"{label}: exit {r.returncode}; stderr={r.stderr.strip()[:200]}")
+            return None
+        txt = r.stdout or ""
+        if len(txt.encode("utf-8")) > CLI_INVENTORY_MAX_BYTES:
+            txt = txt[:CLI_INVENTORY_MAX_BYTES] + "\n# ...truncated\n"
+        return txt.rstrip() + "\n" if txt else ""
+
+    out["uv_tool_list"] = run_safely(["uv", "tool", "list"], "uv_tool_list")
+    out["brew_leaves"] = run_safely(["brew", "leaves"], "brew_leaves")
+    return out
+
+
 # --- Snapshot builder -------------------------------------------------------
 
 def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
@@ -330,9 +509,11 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
     installed_plugins_raw = read_json_safe(home / ".claude" / "plugins" / "installed_plugins.json") or {}
 
     user_skills = list_skills(home / ".claude" / "skills", source_label="user")
+    user_skill_bodies = list_user_skill_bodies(home / ".claude" / "skills", stats)
     plugin_skills = list_plugin_shipped_skills(home)
     commands = list_commands(home / ".claude" / "commands", stats)
     agents = list_agents(home / ".claude" / "agents")
+    external_clis = capture_external_cli_inventory()
 
     # Redact everything. Commands' body field is already redacted in list_commands.
     settings = redact_value(settings_raw, stats)
@@ -367,10 +548,12 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "keybindings": keybindings,
             "statusline": statusline,
             "skills_user": user_skills,
+            "skills_user_bodies": user_skill_bodies,
             "skills_plugin": plugin_skills,
             "commands": commands,
             "agents": agents,
             "installed_plugins": installed_plugins,
+            "external_clis": external_clis,
         },
         "source_paths": {
             "settings_json": "~/.claude/settings.json",
@@ -380,11 +563,13 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "central_files": "~/Claude/<filename>.md — lab-agnostic central rules files referenced by project-local CLAUDE.md via @-import; flat name→content map",
             "keybindings": "~/.claude/keybindings.json",
             "statusline": "~/.config/ccstatusline/settings.json",
-            "skills_user": "~/.claude/skills/<name>/SKILL.md",
+            "skills_user": "~/.claude/skills/<name>/SKILL.md — names + descriptions (always captured)",
+            "skills_user_bodies": "~/.claude/skills/<name>/ — full SKILL.md text + bundled text files; binary or oversized files listed under 'skipped'",
             "skills_plugin": "~/.claude/plugins/cache/<mp>/<plugin>/<ver>/skills/<name>/SKILL.md",
             "commands": "~/.claude/commands/<name>.md (frontmatter + body)",
             "agents": "~/.claude/agents/<name>.md",
             "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
+            "external_clis": "subprocess `uv tool list` + `brew leaves` — externally-installed CLIs that MCP servers / hooks may shell out to (e.g. mcp-youtube-transcript). Best-effort; null if tool not installed.",
             "machine_id": "~/.claude/machine_id (one-line file)",
             "claude_version": "subprocess `claude --version`",
         },
@@ -393,8 +578,9 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "All known API-key shapes (sk-, tvly-, ghp_, AKIA, JWT, etc.) replaced with <REDACTED:type> tokens.",
             "Object keys whose name contains api_key/token/secret/password/auth had their string values redacted.",
             "Local home paths (/Users/<you>/) normalized to ${HOME} for portability.",
-            "Slash-command bodies are captured (redacted). Skill bodies are NOT — only name + description.",
+            "Slash-command bodies are captured (redacted). User-skill bodies are captured under 'skills_user_bodies' (v0.4+); plugin-shipped skills travel via the marketplace, not this snapshot.",
             "Plugin-shipped skills are listed with source='plugin:<plugin>@<marketplace>'; user-level with source='user'.",
+            "external_clis is best-effort: if `uv` or `brew` isn't installed on this machine the field is null. Receiving machines without those binaries can't act on it; that's fine — the field just won't trigger a diff.",
             "Forward-compat fields (agents, keybindings) may be empty if those directories don't exist on this machine.",
             "If you spot anything sensitive that wasn't caught, edit this file by hand before committing.",
         ],
