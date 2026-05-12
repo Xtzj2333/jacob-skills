@@ -190,10 +190,26 @@ Jacob iterates on his skills. When he pushes a new version, you have to pull on 
 ### Claude Code
 
 ```
-/plugin update jacob-skills
+/plugin marketplace update jacob-skills
 ```
 
-This re-pulls the marketplace metadata and refreshes any installed plugins.
+This refreshes Claude Code's catalog of available plugins in the `jacob-skills` marketplace — so newly-added plugins appear and existing ones reflect any updates Jacob has pushed.
+
+**Important.** Do NOT manually `git pull` the marketplace cache directory (e.g. `~/.claude/plugins/cache/jacob-skills/`). Claude Code reads from its own indexed catalog, which `git pull` doesn't touch — the refresh will silently fail. Always use the slash command above.
+
+After the catalog refresh, if there's a new plugin you don't have yet (e.g. Jacob just added `project-map`), install it the same way you installed the original set:
+
+```
+/plugin install project-map@jacob-skills
+```
+
+To upgrade a plugin you already have to its latest version, **reinstall it** — there's no dedicated `/plugin update <plugin>` command:
+
+```
+/plugin install <plugin-name>@jacob-skills
+```
+
+This picks up the latest version after the catalog refresh. ([Source: Claude Code docs — *Discover and install prebuilt plugins*](https://code.claude.com/docs/en/discover-plugins).)
 
 ### Claude Cowork
 
@@ -287,7 +303,7 @@ When you're done, all of the below should be true:
 | --- | --- | --- |
 | Add marketplace | `/plugin marketplace add https://github.com/Xtzj2333/jacob-skills.git` | Customize → Personal plugins → `+` → Create plugin → Add marketplace → `Xtzj2333/jacob-skills` |
 | Install plugin | `/plugin install <name>@jacob-skills` | Customize → Personal plugins → click `+` next to plugin in marketplace |
-| Update marketplace | `/plugin update jacob-skills` | Customize → marketplace → Update button (or remove + re-add) |
+| Update marketplace | `/plugin marketplace update jacob-skills` (never `git pull` the cache dir) | Customize → marketplace → Update button (or remove + re-add) |
 | List installed | `/plugin list` | Customize → Personal plugins (sidebar) |
 | Reload after install | `/reload-plugins` | Restart the Cowork conversation |
 | Toggle focus mode | `/focus` | (N/A — Cowork has its own UI) |
