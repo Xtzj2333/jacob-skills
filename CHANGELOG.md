@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-05-12 — `claude-env-sync` v0.4 (skill bodies + external CLIs) and manifest-version bump
+
+**TL;DR:** `claude-env-sync` now captures (a) full SKILL.md + bundled-file content for personal skills under `~/.claude/skills/`, and (b) an external CLI inventory (`uv tool list` + `brew leaves`) so the diff flags binaries that MCP servers depend on. Also: the plugin manifest version is now bumped on every release (the v0.4 code shipped initially without a manifest bump, so `/plugin install` was a silent no-op — fixed in commit following `cf6c7bf`).
+
+### `claude-env-sync` v0.4
+
+- **Snapshot format 0.3 → 0.4.** Backward-compat preserved.
+- **New capture: user skill bodies.** Full SKILL.md text + bundled text files for each `~/.claude/skills/<name>/`. Third-party skills (marker files like `LICENSE`, `pyproject.toml`, `package.json`) keep their SKILL.md but skip the bundle — install those upstream. Per-skill opt-out via `.envsync-skip-body`. Per-file 150 KB cap, per-bundle 500 KB cap.
+- **New capture: external CLI inventory.** Best-effort `uv tool list` and `brew leaves`. Surfaces, on the import side, tools that exist on the source machine but not the receiving one, with the install command beside each.
+- **New: version-skew warning.** The comparer now emits a clear warning (stderr + JSON field + HTML banner) when the snapshot was produced by a newer publisher than the local comparer. Prevents silent feature gaps.
+- **Manifest version is now load-bearing.** `plugin.json` "version" is bumped on every release so `/plugin install <plugin>@jacob-skills` actually pulls fresh code. (Lesson from the v0.4 silent-no-op incident: Claude Code skips the upgrade when the manifest version is unchanged, even if the script files are newer.)
+
+### How to upgrade on the import side
+
+```
+/plugin marketplace update jacob-skills
+/plugin install claude-env-sync@jacob-skills
+```
+
+Verify with `head -3 ~/.claude/plugins/cache/jacob-skills/*/plugins/claude-env-sync/.claude-plugin/plugin.json` — should show `"version": "0.4.0"`. If still 0.3.0, the marketplace update didn't take; check that the marketplace clone is current.
+
+---
+
 ## 2026-05-11 — `project-map` skill + `claude-env-sync` v0.3
 
 **TL;DR:** New `project-map` skill produces and maintains `MAP.md` orientation files at folder roots (legacy `INDEX.md` name is migrated). `claude-env-sync` plugin bumped to v0.3 with stronger version-pinning of installed plugins and zero-false-positive self-compare.

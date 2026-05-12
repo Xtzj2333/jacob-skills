@@ -41,6 +41,10 @@ from pathlib import Path
 
 # --- Snapshot format version ------------------------------------------------
 
+# Stamped into every snapshot as `snapshot_version`. Kept in lock-step with
+# plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
+# both whenever the publisher gains or changes a capture. The comparer reads
+# this back and warns if its own SCRIPT_VERSION is older.
 SNAPSHOT_FORMAT_VERSION = "0.4.0"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.

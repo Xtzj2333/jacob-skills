@@ -1,6 +1,6 @@
 {
   "name": "claude-env-sync",
   "description": "Publish your Claude Code environment as a redacted snapshot, and on the import side, interactively diff a published snapshot against your own environment and pick what to take. Two skills: publish-env-snapshot (your side) and env-compare (the import side). No auto-stacking — every change is shown and confirmed.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": { "name": "Jacob Zhang" }
 }

@@ -35,6 +35,12 @@ from pathlib import Path
 
 # Kept inline so this script is standalone.
 
+# Script version — keep in sync with plugin.json. Surfaced to consumers so
+# they can detect "snapshot is newer than my comparer" without grepping
+# the script body for capabilities. Bumped together with plugin.json on every
+# feature-affecting change.
+SCRIPT_VERSION = "0.4.0"
+
 CLAUDE_JSON_PUBLISHED_KEYS = {"mcpServers"}
 SAFE_SETTINGS_KEYS = {
     "skillListingBudgetFraction", "permissions", "hooks", "statusLine",
@@ -346,6 +352,39 @@ def list_agents(agents_dir: Path) -> list[dict]:
             continue
         out.append({"name": f.stem})
     return out
+
+
+def _parse_version_tuple(v: str) -> tuple:
+    """Parse 'a.b.c' → (a, b, c). Unparseable segments become 0."""
+    out = []
+    for part in (v or "").split("."):
+        try:
+            out.append(int(part))
+        except (ValueError, TypeError):
+            out.append(0)
+    while len(out) < 3:
+        out.append(0)
+    return tuple(out[:3])
+
+
+def check_version_skew(snapshot: dict) -> dict | None:
+    """If the snapshot was produced by a publisher newer than this comparer,
+    new fields may be present that we don't render. Surface that as a
+    structured warning rather than silently dropping data."""
+    snap_v = snapshot.get("snapshot_version", "0.1.0")
+    if _parse_version_tuple(snap_v) > _parse_version_tuple(SCRIPT_VERSION):
+        return {
+            "kind": "snapshot_newer_than_comparer",
+            "snapshot_version": snap_v,
+            "comparer_version": SCRIPT_VERSION,
+            "message": (
+                f"Snapshot was produced by env-sync v{snap_v}, but this comparer "
+                f"is v{SCRIPT_VERSION}. New sections in the snapshot will be ignored. "
+                f"Upgrade the env-sync plugin: /plugin marketplace update jacob-skills "
+                f"then /plugin install claude-env-sync@jacob-skills."
+            ),
+        }
+    return None
 
 
 def fetch_snapshot(src: str) -> dict:
@@ -830,10 +869,19 @@ def render_html(diff: dict) -> str:
     parts.append(f"<h1>Env diff — your env vs <code>{diff['snapshot_owner']}{machine}</code></h1>")
     parts.append(
         f"<p class='muted'>Snapshot format <code>{diff['snapshot_format_version']}</code> "
+        f"· comparer <code>{SCRIPT_VERSION}</code> "
         f"· generated <code>{diff.get('snapshot_generated_at','?')}</code> "
         f"· compared <code>{diff['compared_at']}</code> "
         f"· their claude version: <code>{diff.get('snapshot_claude_version') or 'unknown'}</code>.</p>"
     )
+    skew = diff.get("version_skew_warning")
+    if skew:
+        parts.append(
+            "<div style='background:#fef2e6;border-left:4px solid #b8860b;"
+            "padding:10px 14px;border-radius:0 4px 4px 0;margin:10px 0;'>"
+            f"<strong>⚠ Version skew:</strong> {skew['message']}"
+            "</div>"
+        )
 
     parts.append("<div class='summary'><strong>At a glance:</strong><ul>")
     parts.append(
@@ -1233,6 +1281,10 @@ def main() -> int:
     snapshot = fetch_snapshot(args.snapshot)
     local = read_local_env()
     diff = build_diff(snapshot, local)
+    skew = check_version_skew(snapshot)
+    if skew:
+        diff["version_skew_warning"] = skew
+        print(f"WARN: {skew['message']}", file=sys.stderr)
 
     text = json.dumps(diff, indent=2, ensure_ascii=False)
     if args.out:
