@@ -1,0 +1,5 @@
+{
+  "name": "jacob-todos",
+  "description": "Manage Jacob's personal to-do system, built on Google Calendar + an HTML check-in surface with tasks_v3.json as the single source of truth. Triggers on consolidation, ranking, adding or merging tasks, the morning check-in, suggested-plan generation, and the scheduled todo-check-in routine.",
+  "author": { "name": "Jacob Zhang" }
+}

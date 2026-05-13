@@ -8,3 +8,6 @@ __pycache__/
 *.docx
 !**/SKILL.docx
 *.pdf
+
+# Local-only session handoff / staging area
+_archive/
