@@ -57,6 +57,11 @@
       "name": "project-map",
       "source": "./plugins/project-map",
       "description": "Creates and maintains MAP.md files — project-navigation files at folder roots that orient Claude (and humans) to what's where, who authored it, and what's source/draft/canonical. Trigger on 'set up a MAP', 'create a project map', 'make a MAP.md', new project orientation when none exists, or stale MAPs after file moves/renames. Standardizes on MAP.md (retires the legacy INDEX.md name, no (claude) suffix). Location encodes scope: one at the project root, optional in complex subfolders."
+    },
+    {
+      "name": "html-review-builder",
+      "source": "./plugins/html-review-builder",
+      "description": "Interactive HTML review reports — Claude's primary channel for any reply too long, multi-paragraph, or feedback-shaped for chat. Form-pattern decisions, multi-turn evolving reports, locked-decision economy, plain-language section titles. Personalized to Jacob (UChicago social-psych researcher); fork and adapt for yours."
     }
   ]
 }
