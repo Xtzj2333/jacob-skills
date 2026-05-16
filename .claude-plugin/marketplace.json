@@ -59,9 +59,14 @@
       "description": "Creates and maintains MAP.md files — project-navigation files at folder roots that orient Claude (and humans) to what's where, who authored it, and what's source/draft/canonical. Trigger on 'set up a MAP', 'create a project map', 'make a MAP.md', new project orientation when none exists, or stale MAPs after file moves/renames. Standardizes on MAP.md (retires the legacy INDEX.md name, no (claude) suffix). Location encodes scope: one at the project root, optional in complex subfolders."
     },
     {
-      "name": "html-review-builder",
-      "source": "./plugins/html-review-builder",
-      "description": "Interactive HTML review reports — Claude's primary channel for any reply too long, multi-paragraph, or feedback-shaped for chat. Form-pattern decisions, multi-turn evolving reports, locked-decision economy, plain-language section titles. Personalized to Jacob (UChicago social-psych researcher); fork and adapt for yours."
+      "name": "chat-substitute-html",
+      "source": "./plugins/chat-substitute-html",
+      "description": "Conventions for HTMLs that stand in for chat — pin, what's-new surface, locked-decision economy, bi-file iteration pattern. Used when Claude's reply to Jacob would be too long for chat. Personalized to Jacob (UChicago social-psych researcher); fork and adapt for yours."
+    },
+    {
+      "name": "decision-forms-html",
+      "source": "./plugins/decision-forms-html",
+      "description": "Interactive decision-form pattern for HTML pages — radios, comment textareas, sticky Copy/Download/Clear toolbar, localStorage persistence. Composable into chat-substitute HTMLs, literature reviews, mockups, anywhere Claude needs answers back."
     }
   ]
 }

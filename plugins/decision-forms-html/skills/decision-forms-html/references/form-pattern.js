@@ -1,7 +1,7 @@
-// Reference implementation for html-review-builder's decision-form pattern.
+// Reference implementation for the decision-forms-html skill.
 // Drop once at the end of <body>. Adapt aesthetics freely; behavior must match.
 //
-// Contract (see SKILL.md for full rationale):
+// Contract (see decision-forms-html/SKILL.md for full rationale):
 // - Radios are clickable-to-uncheck (mousedown + click handlers track _lastChecked)
 // - localStorage persists selections + free-text across reloads
 // - Sticky toolbar exposes copy-all (Markdown), download-json, clear-all

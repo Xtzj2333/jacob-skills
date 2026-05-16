@@ -1,0 +1,5 @@
+{
+  "name": "chat-substitute-html",
+  "description": "Conventions for HTMLs that stand in for chat — pin, what's-new surface, locked-decision economy, bi-file iteration pattern. Used when Claude's reply to Jacob would be too long for chat. Form mechanics come from decision-forms-html (cross-referenced).",
+  "author": { "name": "Jacob Zhang" }
+}

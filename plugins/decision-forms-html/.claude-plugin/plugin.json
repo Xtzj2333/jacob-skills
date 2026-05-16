@@ -1,0 +1,5 @@
+{
+  "name": "decision-forms-html",
+  "description": "Interactive decision-form pattern for HTML pages — radio choices, comment textareas, sticky Copy/Download/Clear toolbar, localStorage persistence. Composable into chat-substitute HTMLs, literature reviews, mockups, anywhere Claude needs answers back.",
+  "author": { "name": "Jacob Zhang" }
+}
