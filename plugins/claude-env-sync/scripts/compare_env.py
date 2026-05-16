@@ -39,7 +39,7 @@ from pathlib import Path
 # they can detect "snapshot is newer than my comparer" without grepping
 # the script body for capabilities. Bumped together with plugin.json on every
 # feature-affecting change.
-SCRIPT_VERSION = "0.4.0"
+SCRIPT_VERSION = "0.5.0"
 
 CLAUDE_JSON_PUBLISHED_KEYS = {"mcpServers"}
 SAFE_SETTINGS_KEYS = {
@@ -343,6 +343,58 @@ def capture_external_cli_inventory() -> dict:
     return out
 
 
+def capture_plugin_user_configs_local(home: Path, enabled_plugins: dict) -> dict:
+    """Mirror of publish_snapshot.capture_plugin_user_configs — same shape, redacted via redact_local."""
+    PLUGIN_USER_CONFIG_MAX_BYTES = 64 * 1024
+    PLUGIN_USER_CONFIG_EXTS = {".json", ".toml", ".yaml", ".yml", ".ini", ".conf"}
+    PLUGIN_USER_CONFIG_SKIP_NAMES = {"plugin-root", "state.json", "cache.json"}
+    PLUGIN_USER_CONFIG_SKIP_SUFFIXES = (".log", ".lock", ".pid", ".cache", ".tmp")
+    out: dict = {}
+    if not enabled_plugins:
+        return out
+    for full_name in enabled_plugins.keys():
+        plugin_name = full_name.split("@", 1)[0]
+        plugin_dir = home / ".claude" / plugin_name
+        if not plugin_dir.is_dir():
+            continue
+        captured: dict = {}
+        try:
+            entries = sorted(plugin_dir.iterdir())
+        except PermissionError:
+            continue
+        for f in entries:
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            if f.name in PLUGIN_USER_CONFIG_SKIP_NAMES:
+                continue
+            if any(f.name.endswith(suf) for suf in PLUGIN_USER_CONFIG_SKIP_SUFFIXES):
+                continue
+            if f.suffix.lower() not in PLUGIN_USER_CONFIG_EXTS:
+                continue
+            try:
+                size = f.stat().st_size
+            except OSError:
+                continue
+            if size > PLUGIN_USER_CONFIG_MAX_BYTES:
+                captured[f.name] = {"_skipped": f"file larger than {PLUGIN_USER_CONFIG_MAX_BYTES} bytes ({size} bytes)"}
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if f.suffix.lower() == ".json":
+                try:
+                    parsed = json.loads(text)
+                    captured[f.name] = redact_local(parsed)
+                    continue
+                except json.JSONDecodeError:
+                    pass
+            captured[f.name] = _normalize_home(_redact_string(text))
+        if captured:
+            out[plugin_name] = captured
+    return out
+
+
 def list_agents(agents_dir: Path) -> list[dict]:
     if not agents_dir.is_dir():
         return []
@@ -417,6 +469,9 @@ def read_local_env() -> dict:
         "agents": list_agents(home / ".claude" / "agents"),
         "installed_plugins": read_json_safe(home / ".claude" / "plugins" / "installed_plugins.json") or {},
         "external_clis": capture_external_cli_inventory(),
+        "plugin_user_configs": capture_plugin_user_configs_local(
+            home, (settings.get("enabledPlugins") or {})
+        ),
     }
     # Apply publisher's redaction + home-normalization so self-compare is clean.
     # (Without this, every redacted secret and every absolute path shows as a "diff".)
@@ -711,6 +766,35 @@ def diff_external_clis(theirs: dict, mine: dict) -> dict:
     }
 
 
+def diff_plugin_user_configs(theirs: dict, mine: dict) -> dict:
+    """Diff per-plugin user-customized config (~/.claude/<plugin>/*.json|toml|...).
+    For each (plugin, file): same / diff / only_theirs / only_mine.
+    Captured in v0.5+; older snapshots arrive with an empty dict."""
+    out: dict = {}
+    theirs = theirs or {}
+    mine = mine or {}
+    for plugin in sorted(set(theirs.keys()) | set(mine.keys())):
+        t_files = theirs.get(plugin) or {}
+        m_files = mine.get(plugin) or {}
+        per_file: dict = {}
+        for f in sorted(set(t_files.keys()) | set(m_files.keys())):
+            in_t = f in t_files
+            in_m = f in m_files
+            if in_t and in_m:
+                identical = t_files[f] == m_files[f]
+                per_file[f] = {
+                    "status": "same" if identical else "diff",
+                    "theirs": None if identical else t_files[f],
+                    "mine": None if identical else m_files[f],
+                }
+            elif in_t:
+                per_file[f] = {"status": "only_theirs", "theirs": t_files[f]}
+            else:
+                per_file[f] = {"status": "only_mine", "mine": m_files[f]}
+        out[plugin] = per_file
+    return out
+
+
 def build_diff(snapshot: dict, local: dict) -> dict:
     env_t = snapshot.get("environment", {})
     env_m = local
@@ -784,6 +868,10 @@ def build_diff(snapshot: dict, local: dict) -> dict:
             env_t.get("external_clis", {}) or {},
             env_m.get("external_clis", {}) or {},
         ),
+        "plugin_user_configs": diff_plugin_user_configs(
+            env_t.get("plugin_user_configs", {}) or {},
+            env_m.get("plugin_user_configs", {}) or {},
+        ),
     }
 
     s = diff["summary_counts"]
@@ -825,6 +913,23 @@ def build_diff(snapshot: dict, local: dict) -> dict:
     s["uv_tools_only_in_mine"] = len(ec["uv_only_mine"])
     s["brew_only_in_theirs"] = len(ec["brew_only_theirs"])
     s["brew_only_in_mine"] = len(ec["brew_only_mine"])
+    puc = diff["plugin_user_configs"]
+    puc_diff = puc_only_t = puc_only_m = puc_same = 0
+    for files in puc.values():
+        for entry in files.values():
+            st = entry.get("status")
+            if st == "diff":
+                puc_diff += 1
+            elif st == "only_theirs":
+                puc_only_t += 1
+            elif st == "only_mine":
+                puc_only_m += 1
+            elif st == "same":
+                puc_same += 1
+    s["plugin_user_configs_diverged"] = puc_diff
+    s["plugin_user_configs_only_in_theirs"] = puc_only_t
+    s["plugin_user_configs_only_in_mine"] = puc_only_m
+    s["plugin_user_configs_same"] = puc_same
     return diff
 
 
@@ -1253,6 +1358,43 @@ def render_html(diff: dict) -> str:
         if ec.get("theirs_notes") or ec.get("mine_notes"):
             parts.append("<p class='muted'>Capture notes (e.g. missing uv/brew on one side): "
                          f"theirs={ec.get('theirs_notes', [])}, yours={ec.get('mine_notes', [])}</p>")
+
+    # Plugin user configs (v0.5+)
+    parts.append("<h2>Plugin user configs <span class='muted'>(per-plugin files under ~/.claude/&lt;plugin&gt;/)</span></h2>")
+    puc = diff.get("plugin_user_configs", {}) or {}
+    if not puc:
+        parts.append("<p class='muted'>No plugin user configs captured on either side. "
+                     "(Either the snapshot pre-dates v0.5 or none of the enabled plugins persist user config under ~/.claude/.)</p>")
+    else:
+        any_rendered = False
+        for plugin in sorted(puc.keys()):
+            files = puc[plugin] or {}
+            if not files:
+                continue
+            any_rendered = True
+            parts.append(f"<h3><code>{plugin}</code></h3>")
+            for fname in sorted(files.keys()):
+                entry = files[fname] or {}
+                status = entry.get("status")
+                if status == "same":
+                    parts.append(f"<p><span class='tag'>{fname}</span> identical ✓</p>")
+                elif status == "only_theirs":
+                    parts.append(f"<div class='theirs-only'><strong>Only in theirs — <code>{fname}</code> (you don't have it):</strong>")
+                    parts.append(html_pre(entry.get("theirs")))
+                    parts.append("</div>")
+                elif status == "only_mine":
+                    parts.append(f"<div class='mine-only'><strong>Only in yours — <code>{fname}</code>:</strong>")
+                    parts.append(html_pre(entry.get("mine")))
+                    parts.append("</div>")
+                elif status == "diff":
+                    parts.append(f"<div class='both-diff'><strong>Both have <code>{fname}</code> but content differs:</strong>")
+                    parts.append("<div class='col'><div class='label'>Theirs</div>")
+                    parts.append(html_pre(entry.get("theirs")))
+                    parts.append("</div><div class='col'><div class='label'>Yours</div>")
+                    parts.append(html_pre(entry.get("mine")))
+                    parts.append("</div></div>")
+        if not any_rendered:
+            parts.append("<p>All captured plugin user configs match. ✓</p>")
 
     # CLAUDE.md
     parts.append("<h2>Global CLAUDE.md</h2>")

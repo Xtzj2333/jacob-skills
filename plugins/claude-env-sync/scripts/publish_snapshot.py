@@ -2,7 +2,14 @@
 """
 publish_snapshot.py — capture a redacted snapshot of a Claude Code environment.
 
-v0.4 adds (on top of v0.3):
+v0.5 adds (on top of v0.4):
+  - Plugin USER CONFIGS (~/.claude/<plugin-name>/*.{json,toml,yaml,yml,ini,conf}).
+    Many plugins persist user-tweakable settings outside settings.json — e.g.
+    claude-notifications-go/config.json holds your sound choices, suppression
+    timers, webhook setup. Captured per-plugin so collaborators can see and
+    optionally import them.
+
+v0.4 added (on top of v0.3):
   - User skill BODIES (full SKILL.md + bundled files under ~/.claude/skills/<name>/)
     so personal skills actually transfer, not just their names.
   - External CLI inventory (best-effort `uv tool list` + `brew leaves`)
@@ -45,7 +52,7 @@ from pathlib import Path
 # plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
 # both whenever the publisher gains or changes a capture. The comparer reads
 # this back and warns if its own SCRIPT_VERSION is older.
-SNAPSHOT_FORMAT_VERSION = "0.4.0"
+SNAPSHOT_FORMAT_VERSION = "0.5.0"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
 SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
@@ -493,6 +500,87 @@ def capture_external_cli_inventory() -> dict:
     return out
 
 
+# --- Plugin user configs ----------------------------------------------------
+
+# Cap per-file capture for plugin user configs; these should be small.
+PLUGIN_USER_CONFIG_MAX_BYTES = 64 * 1024
+PLUGIN_USER_CONFIG_EXTS = {".json", ".toml", ".yaml", ".yml", ".ini", ".conf"}
+# Filenames or suffixes that indicate runtime state rather than user config.
+PLUGIN_USER_CONFIG_SKIP_NAMES = {"plugin-root", "state.json", "cache.json"}
+PLUGIN_USER_CONFIG_SKIP_SUFFIXES = (".log", ".lock", ".pid", ".cache", ".tmp")
+
+
+def capture_plugin_user_configs(home: Path, enabled_plugins: dict, stats: dict) -> dict:
+    """
+    For each enabled plugin, look for user-customizable config files at
+    ~/.claude/<plugin-name>/ and capture small text-config files.
+
+    Many plugins (e.g. claude-notifications-go) persist user-tweakable
+    settings here rather than in settings.json — sounds, suppression
+    timers, webhook configs, etc. Without capturing these, the snapshot
+    reports the plugin as installed but the receiving side has no way
+    to mirror the actual customization.
+
+    Captures only top-level files (no recursion into subdirs) to avoid
+    hauling in large state caches. Skips dotfiles, log files, lock files,
+    and anything over PLUGIN_USER_CONFIG_MAX_BYTES.
+
+    Returns:
+        {plugin_name: {filename: redacted-content}, ...}
+        Empty dict if no enabled plugins have a matching directory.
+    """
+    out: dict = {}
+    if not enabled_plugins:
+        return out
+    for full_name in enabled_plugins.keys():
+        # enabledPlugins keys look like "<plugin>@<marketplace>"; the
+        # directory under ~/.claude/ uses just the plugin part.
+        plugin_name = full_name.split("@", 1)[0]
+        plugin_dir = home / ".claude" / plugin_name
+        if not plugin_dir.is_dir():
+            continue
+        captured: dict = {}
+        try:
+            entries = sorted(plugin_dir.iterdir())
+        except PermissionError:
+            continue
+        for f in entries:
+            if not f.is_file():
+                continue
+            if f.name.startswith("."):
+                continue
+            if f.name in PLUGIN_USER_CONFIG_SKIP_NAMES:
+                continue
+            if any(f.name.endswith(suf) for suf in PLUGIN_USER_CONFIG_SKIP_SUFFIXES):
+                continue
+            if f.suffix.lower() not in PLUGIN_USER_CONFIG_EXTS:
+                continue
+            try:
+                size = f.stat().st_size
+            except OSError:
+                continue
+            if size > PLUGIN_USER_CONFIG_MAX_BYTES:
+                captured[f.name] = {
+                    "_skipped": f"file larger than {PLUGIN_USER_CONFIG_MAX_BYTES} bytes ({size} bytes)",
+                }
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if f.suffix.lower() == ".json":
+                try:
+                    parsed = json.loads(text)
+                    captured[f.name] = redact_value(parsed, stats)
+                    continue
+                except json.JSONDecodeError:
+                    pass  # fall through to text-redact path
+            captured[f.name] = redact_string(normalize_home(text, stats), stats)
+        if captured:
+            out[plugin_name] = captured
+    return out
+
+
 # --- Snapshot builder -------------------------------------------------------
 
 def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
@@ -518,6 +606,9 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
     commands = list_commands(home / ".claude" / "commands", stats)
     agents = list_agents(home / ".claude" / "agents")
     external_clis = capture_external_cli_inventory()
+    plugin_user_configs = capture_plugin_user_configs(
+        home, settings_raw.get("enabledPlugins") or {}, stats
+    )
 
     # Redact everything. Commands' body field is already redacted in list_commands.
     settings = redact_value(settings_raw, stats)
@@ -558,6 +649,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "agents": agents,
             "installed_plugins": installed_plugins,
             "external_clis": external_clis,
+            "plugin_user_configs": plugin_user_configs,
         },
         "source_paths": {
             "settings_json": "~/.claude/settings.json",
@@ -574,6 +666,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "agents": "~/.claude/agents/<name>.md",
             "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
             "external_clis": "subprocess `uv tool list` + `brew leaves` — externally-installed CLIs that MCP servers / hooks may shell out to (e.g. mcp-youtube-transcript). Best-effort; null if tool not installed.",
+            "plugin_user_configs": "~/.claude/<plugin-name>/{*.json,*.toml,*.yaml,*.yml,*.ini,*.conf} — per-plugin user-customized config files that plugins persist outside of settings.json (e.g. claude-notifications-go/config.json: sounds, suppression timers, webhook setup). Top-level files only; <64KB each; redacted.",
             "machine_id": "~/.claude/machine_id (one-line file)",
             "claude_version": "subprocess `claude --version`",
         },
@@ -586,6 +679,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "Plugin-shipped skills are listed with source='plugin:<plugin>@<marketplace>'; user-level with source='user'.",
             "external_clis is best-effort: if `uv` or `brew` isn't installed on this machine the field is null. Receiving machines without those binaries can't act on it; that's fine — the field just won't trigger a diff.",
             "Forward-compat fields (agents, keybindings) may be empty if those directories don't exist on this machine.",
+            "plugin_user_configs (v0.5+): captures per-plugin user config under ~/.claude/<plugin-name>/. Top-level files only; binary, oversized, or non-config-suffix files are skipped. Comparer surfaces these so a collaborator can mirror your tuning.",
             "If you spot anything sensitive that wasn't caught, edit this file by hand before committing.",
         ],
     }
