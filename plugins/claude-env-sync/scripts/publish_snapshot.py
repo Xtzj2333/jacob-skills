@@ -52,7 +52,7 @@ from pathlib import Path
 # plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
 # both whenever the publisher gains or changes a capture. The comparer reads
 # this back and warns if its own SCRIPT_VERSION is older.
-SNAPSHOT_FORMAT_VERSION = "0.5.0"
+SNAPSHOT_FORMAT_VERSION = "0.6.0"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
 SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
@@ -78,6 +78,95 @@ THIRD_PARTY_SKILL_MARKERS = {
 # Explicit per-skill opt-out: drop a file named this at the skill root to keep
 # its body out of snapshots.
 SKILL_BODY_OPTOUT_FILE = ".envsync-skip-body"
+
+
+def detect_upstream(skill_dir: Path) -> dict:
+    """Best-effort: return upstream metadata for a third-party skill.
+
+    Always gathers .git/config URL + HEAD SHA if present — those pin the exact
+    version the snapshot owner is running. Then if README documents a cleaner
+    install path (Claude Code marketplace), surfaces that as the install_kind
+    so env-compare can render `/plugin marketplace add ...` instead of
+    `git clone ...`.
+
+    Shape:
+      {
+        "url":               <upstream URL — github repo or similar>,
+        "sha":               <git HEAD SHA if available, else null>,
+        "install_kind":      "plugin-marketplace" | "git-clone",
+        "install_marketplace_handle": "<owner>/<repo>"  (only when install_kind=plugin-marketplace),
+      }
+
+    Returns {} if nothing found — env-compare will then fall back to "unknown upstream".
+    """
+    out: dict = {}
+
+    # (a) .git/config — most authoritative pin
+    git_config = skill_dir / ".git" / "config"
+    if git_config.exists():
+        try:
+            text = git_config.read_text(errors="replace")
+            m = re.search(r"url\s*=\s*(\S+)", text)
+            if m:
+                out["url"] = m.group(1)
+        except Exception:
+            pass
+        head_file = skill_dir / ".git" / "HEAD"
+        if head_file.exists():
+            try:
+                head = head_file.read_text().strip()
+                if head.startswith("ref: "):
+                    ref_path = skill_dir / ".git" / head[5:]
+                    if ref_path.exists():
+                        out["sha"] = ref_path.read_text().strip()
+                else:
+                    out["sha"] = head
+            except Exception:
+                pass
+
+    # (b) README scan for /plugin marketplace add <owner>/<repo> — preferred install path
+    readme = skill_dir / "README.md"
+    marketplace_handle = None
+    if readme.exists():
+        try:
+            rtext = readme.read_text(errors="replace")
+            m = re.search(r"/plugin\s+marketplace\s+add\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", rtext)
+            if m:
+                marketplace_handle = m.group(1)
+        except Exception:
+            pass
+
+    # (c) Fallback URL via README git clone or pyproject.toml — only if .git/config didn't have one
+    if "url" not in out and readme.exists():
+        try:
+            rtext = readme.read_text(errors="replace")
+            m = re.search(r"git\s+clone\s+(https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?)", rtext)
+            if m:
+                out["url"] = m.group(1)
+        except Exception:
+            pass
+    if "url" not in out:
+        pp = skill_dir / "pyproject.toml"
+        if pp.exists():
+            try:
+                ptext = pp.read_text(errors="replace")
+                for key in ("Homepage", "Repository", "homepage", "repository"):
+                    m = re.search(rf'^{key}\s*=\s*["\'](https?://\S+?)["\']', ptext, re.MULTILINE)
+                    if m:
+                        out["url"] = m.group(1)
+                        break
+            except Exception:
+                pass
+
+    if marketplace_handle:
+        out["install_kind"] = "plugin-marketplace"
+        out["install_marketplace_handle"] = marketplace_handle
+        if "url" not in out:
+            out["url"] = f"https://github.com/{marketplace_handle}"
+    elif "url" in out:
+        out["install_kind"] = "git-clone"
+
+    return out
 
 # --- Redaction patterns -----------------------------------------------------
 
@@ -411,6 +500,13 @@ def list_user_skill_bodies(skills_dir: Path, stats: dict) -> list[dict]:
                     except Exception:
                         pass
 
+        # If we skipped, surface structured upstream metadata so env-compare can
+        # render an install command instead of telling the collaborator to ask
+        # the snapshot owner to promote the skill.
+        upstream: dict = {}
+        if bundle_status.startswith("skipped:third_party_"):
+            upstream = detect_upstream(entry)
+
         files: list[dict] = []
         skipped: list[dict] = []
 
@@ -455,13 +551,16 @@ def list_user_skill_bodies(skills_dir: Path, stats: dict) -> list[dict]:
                 files = []
                 skipped = []
 
-        out.append({
+        record = {
             "name": entry.name,
             "skill_md": skill_md_redacted,
             "bundle_status": bundle_status,
             "files": files,
             "skipped": skipped,
-        })
+        }
+        if upstream:
+            record["upstream"] = upstream
+        out.append(record)
     return out
 
 

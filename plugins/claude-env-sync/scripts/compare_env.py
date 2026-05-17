@@ -39,7 +39,7 @@ from pathlib import Path
 # they can detect "snapshot is newer than my comparer" without grepping
 # the script body for capabilities. Bumped together with plugin.json on every
 # feature-affecting change.
-SCRIPT_VERSION = "0.5.0"
+SCRIPT_VERSION = "0.6.0"
 
 CLAUDE_JSON_PUBLISHED_KEYS = {"mcpServers"}
 SAFE_SETTINGS_KEYS = {
@@ -658,9 +658,28 @@ def diff_central_files(theirs: dict, mine: dict) -> dict:
     return out
 
 
+def _install_command_for(name: str, upstream: dict | None) -> str | None:
+    """Render a copy-pasteable install command from upstream metadata, or None."""
+    if not upstream or "url" not in upstream:
+        return None
+    kind = upstream.get("install_kind")
+    url = upstream["url"]
+    if kind == "plugin-marketplace":
+        handle = upstream.get("install_marketplace_handle")
+        if handle:
+            return (
+                f"/plugin marketplace add {handle}    "
+                f"# then: /plugin install <plugin-name>@<marketplace-name>  (see {url} README)"
+            )
+    # Default to git-clone — works for any URL we found.
+    return f"git clone {url} ~/.claude/skills/{name}"
+
+
 def diff_skill_bodies(theirs: list[dict], mine: list[dict]) -> dict:
     """Diff user skill BODIES (added in v0.4).
-    Pairs by skill name and reports SKILL.md identity + bundle-file divergence."""
+    Pairs by skill name and reports SKILL.md identity + bundle-file divergence.
+    For third-party (skipped:*) skills, surfaces upstream URL + install command
+    so consumers don't have to ask the snapshot owner to promote them (v0.5)."""
     t = {x["name"]: x for x in (theirs or []) if "name" in x}
     m = {x["name"]: x for x in (mine or []) if "name" in x}
     only_theirs = []
@@ -669,11 +688,14 @@ def diff_skill_bodies(theirs: list[dict], mine: list[dict]) -> dict:
     both_diff = []
     for name in sorted(set(t.keys()) | set(m.keys())):
         if name in t and name not in m:
+            theirs_ups = t[name].get("upstream")
             only_theirs.append({
                 "name": name,
                 "bundle_status": t[name].get("bundle_status"),
                 "skill_md_chars": len(t[name].get("skill_md", "")),
                 "bundle_files": len(t[name].get("files", [])),
+                "upstream": theirs_ups,
+                "install_command": _install_command_for(name, theirs_ups),
             })
         elif name in m and name not in t:
             only_mine.append({
@@ -698,6 +720,10 @@ def diff_skill_bodies(theirs: list[dict], mine: list[dict]) -> dict:
             if md_same and not (files_only_theirs or files_only_mine or files_both_diff):
                 both_same.append(name)
             else:
+                theirs_ups = tt.get("upstream")
+                mine_ups = mm.get("upstream")
+                theirs_sha = (theirs_ups or {}).get("sha")
+                mine_sha = (mine_ups or {}).get("sha")
                 both_diff.append({
                     "name": name,
                     "skill_md_same": md_same,
@@ -710,6 +736,11 @@ def diff_skill_bodies(theirs: list[dict], mine: list[dict]) -> dict:
                     "files_both_diff": files_both_diff,
                     "theirs_bundle_status": tt.get("bundle_status"),
                     "mine_bundle_status": mm.get("bundle_status"),
+                    "theirs_upstream": theirs_ups,
+                    "mine_upstream": mine_ups,
+                    "upstream_sha_drift": bool(theirs_sha and mine_sha and theirs_sha != mine_sha),
+                    "theirs_sha": theirs_sha,
+                    "mine_sha": mine_sha,
                 })
     return {
         "only_theirs": only_theirs,
@@ -1290,13 +1321,34 @@ def render_html(diff: dict) -> str:
                      "(skill-body capture was added in v0.4). Re-publish to surface this section.</p>")
     else:
         if sb["only_theirs"]:
-            parts.append("<div class='theirs-only'><strong>Only in theirs — paste these into <code>~/.claude/skills/&lt;name&gt;/</code> to acquire:</strong><ul>")
+            parts.append("<div class='theirs-only'><strong>Only in theirs — to acquire:</strong><ul>")
             for x in sb["only_theirs"]:
-                parts.append(
-                    f"<li><code>{x['name']}</code> — SKILL.md {x['skill_md_chars']} chars, "
-                    f"{x['bundle_files']} bundle files (status: <code>{x.get('bundle_status','?')}</code>). "
-                    f"Body in JSON diff under <code>skills_user_bodies.only_theirs</code>.</li>"
-                )
+                install_cmd = x.get("install_command")
+                ups = x.get("upstream") or {}
+                bundle_status = x.get("bundle_status", "?")
+                is_third_party = bundle_status.startswith("skipped:third_party")
+                if is_third_party and install_cmd:
+                    parts.append(
+                        f"<li><code>{x['name']}</code> "
+                        f"<span class='tag'>third-party</span> "
+                        f"— install from upstream "
+                        f"(<a href='{ups.get('url','#')}'>{ups.get('url','source')}</a>):"
+                        f"<br><pre style='margin:6px 0;'>{install_cmd}</pre></li>"
+                    )
+                elif is_third_party:
+                    parts.append(
+                        f"<li><code>{x['name']}</code> "
+                        f"<span class='tag'>third-party</span> "
+                        f"— bundle skipped (<code>{bundle_status}</code>) and no upstream URL detected. "
+                        f"Ask the snapshot owner where they got it from.</li>"
+                    )
+                else:
+                    parts.append(
+                        f"<li><code>{x['name']}</code> — SKILL.md {x['skill_md_chars']} chars, "
+                        f"{x['bundle_files']} bundle files. Paste the body from "
+                        f"<code>skills_user_bodies.only_theirs</code> in the JSON diff into "
+                        f"<code>~/.claude/skills/{x['name']}/</code>.</li>"
+                    )
             parts.append("</ul></div>")
         if sb["only_mine"]:
             parts.append("<div class='mine-only'><strong>Only in yours:</strong><ul>")
@@ -1308,6 +1360,13 @@ def render_html(diff: dict) -> str:
             for x in sb["both_diff"]:
                 parts.append(f"<h3>{x['name']}</h3>")
                 bits = []
+                if x.get("upstream_sha_drift"):
+                    bits.append(
+                        f"<span class='tag t'>upstream version drift:</span> "
+                        f"theirs at <code>{(x.get('theirs_sha') or '')[:12]}</code>, "
+                        f"yours at <code>{(x.get('mine_sha') or '')[:12]}</code> — "
+                        f"run <code>git -C ~/.claude/skills/{x['name']} pull</code> on whichever side is older"
+                    )
                 if not x["skill_md_same"]:
                     bits.append(f"SKILL.md differs (theirs {x['theirs_skill_md_chars']} vs yours {x['mine_skill_md_chars']} chars)")
                 if x["files_only_theirs"]:
