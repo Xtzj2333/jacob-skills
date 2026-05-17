@@ -1,0 +1,7 @@
+{
+  "name": "paper-retrieval",
+  "description": "Use when the user asks to find or download the PDF of a specific named academic paper by title, author, or DOI. Triggers on \"download paper X\", \"find/get the PDF of Y\", \"fetch this paper\", \"get the full text of Z\", or upgrading an ABSTRACT-ONLY reference to FULL-PDF. Skip for general literature exploration (use paper-search MCP directly), for citation-metadata verification (use citation-checker), or for citation-rich research briefs (use research-27).",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}

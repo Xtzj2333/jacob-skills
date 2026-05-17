@@ -1,0 +1,7 @@
+{
+  "name": "paper-search",
+  "description": "ALWAYS invoke this skill when the user asks to search/browse/find academic literature on a topic. Do NOT use WebSearch or general knowledge for \"find papers on X\" / \"what's the literature on Y\" / \"recent work about Z\" — use this skill first. Searches arXiv, PubMed, Semantic Scholar, CrossRef across 20+ sources. Skip ONLY for: fetching a specific named paper by title/DOI (use paper-retrieval), verifying citation metadata (use citation-checker), or full research briefs (use research-27).",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}

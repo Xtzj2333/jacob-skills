@@ -67,6 +67,31 @@
       "name": "decision-forms-html",
       "source": "./plugins/decision-forms-html",
       "description": "Interactive decision-form pattern for HTML pages — radios, comment textareas, sticky Copy/Download/Clear toolbar, localStorage persistence. Composable into chat-substitute HTMLs, literature reviews, mockups, anywhere Claude needs answers back."
+    },
+    {
+      "name": "jacob-todos",
+      "source": "./plugins/jacob-todos",
+      "description": "Manage Jacob's personal to-do system, built on Google Calendar + an HTML check-in surface with tasks_v3.json as the single source of truth. Triggers on consolidation, ranking, adding or merging tasks, the morning check-in, suggested-plan generation, and the scheduled todo-check-in routine."
+    },
+    {
+      "name": "paper-search",
+      "source": "./plugins/paper-search",
+      "description": "ALWAYS invoke when the user asks to search/browse/find academic literature on a topic. Searches arXiv, PubMed, Semantic Scholar, CrossRef across 20+ sources. Skip ONLY for: fetching a specific named paper (use paper-retrieval), verifying citation metadata (use citation-checker), or full research briefs (use research-27)."
+    },
+    {
+      "name": "paper-retrieval",
+      "source": "./plugins/paper-retrieval",
+      "description": "Use when the user asks to find or download the PDF of a specific named academic paper by title, author, or DOI. Triggers on \"download paper X\", \"find/get the PDF of Y\", \"fetch this paper\", or upgrading an ABSTRACT-ONLY reference to FULL-PDF."
+    },
+    {
+      "name": "markdown-report-builder",
+      "source": "./plugins/markdown-report-builder",
+      "description": "Build polished `.docx` (via pandoc reference doc) and `.pdf` (via Eisvogel LaTeX template) from a markdown source. Cross-project; one-time setup per project, then `./reports/build.sh report.md` produces a clean Word + PDF pair."
+    },
+    {
+      "name": "vector-stimulus-design",
+      "source": "./plugins/vector-stimulus-design",
+      "description": "Use when generating parameterized research stimuli from designer vector source files (Adobe Illustrator .ai, .svg). Covers lossless extraction, shape editing, color permutation, rasterization, reproducibility, and the review workflow for collaborating with a researcher on stimulus choice."
     }
   ]
 }

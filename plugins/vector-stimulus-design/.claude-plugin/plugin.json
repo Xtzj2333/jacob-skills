@@ -1,0 +1,7 @@
+{
+  "name": "vector-stimulus-design",
+  "description": "Use when generating parameterized research stimuli from designer vector source files (Adobe Illustrator .ai, .svg). Covers lossless extraction, shape editing, color permutation, rasterization, reproducibility, and the review workflow for collaborating with a researcher on stimulus choice.",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}

@@ -5,7 +5,7 @@ description: Use when Claude's reply to Jacob would be a long or multi-paragraph
 
 # chat-substitute-html
 
-> Conventions for HTMLs that stand in for chat. The page roles, the "what's new" pin, the locked-decision economy, the bi-file iteration pattern, the status banner — all the ways an iterating review document stays scannable across renders. Form mechanics themselves (radios, toolbar, persistence) come from `decision-forms-html`, which this skill cross-references.
+> Conventions for HTMLs that stand in for chat. The page roles, the "what's new" pin, the locked-decision economy, the bi-file iteration pattern, the status banner — all the ways an iterating chat-substitute stays scannable across renders. Form mechanics themselves (radios, toolbar, persistence) come from `decision-forms-html`, which this skill cross-references.
 
 ## When to use vs. when to skip
 
@@ -14,23 +14,38 @@ description: Use when Claude's reply to Jacob would be a long or multi-paragraph
 | Multi-turn review where status evolves between renders | ✓ |
 | One long structured reply with decisions needed | ✓ |
 | Single-decision standalone ask | ✓ |
-| HTML that IS the deliverable (lit review, mockup, demo, info page, frontend tool) | ✗ — design freely |
+| HTML that IS the deliverable (lit review, mockup, demo, info page, frontend tool) — single render | ✗ — design freely |
+| HTML deliverable that is being iterated on across renders | ✓ — pair with a separate `_chat-substitute.html` (see "Pair, don't pollute" below); keep furniture out of the deliverable itself |
 | Finished brief Jacob reads straight through | ✗ — use `markdown-report-builder` for .docx/.pdf |
 | Finished doc Jacob leaves inline margin comments on | ✗ — Jacob calls `commented-edit-roundtrip` manually when needed |
 | Throwaway content Jacob never reopens | ✗ — inline chat |
 
-If unsure, prefer this skill for anything iterative ("we'll come back to this," "let me think about it," "what about X?"). Skip aggressively when the HTML is a deliverable — review-conversation furniture (pins, status banners, decision forms) restricts Claude's design freedom for content where the structure IS the point.
+If unsure, prefer this skill for anything iterative ("we'll come back to this," "let me think about it," "what about X?"). Skip aggressively when the HTML is a deliverable — review-conversation furniture (pins, status banners, decision forms) restricts Claude's design freedom for content where the structure IS the point. **But: when iterating on a deliverable, pair it with a separate chat-substitute file (see "Pair, don't pollute" below) — don't conflate "no furniture in the deliverable" with "no chat-substitute at all."**
+
+## Pair, don't pollute: deliverable + chat-substitute alongside
+
+When the task produces both a keepable artifact (lit review, info page, report Jacob would share) and iterative conversation about that artifact, keep them in separate files. Don't retrofit chat-substitute furniture (pins, decision forms, "what's new" markers) into the deliverable — it clutters what's supposed to be a clean shareable artifact.
+
+Instead: ship the deliverable designed-freely, and **open a paired chat-substitute HTML alongside it.** The deliverable is the noun; the chat-substitute is where you talk about the noun — what changed since last render, what to pay attention to, what decisions need answering.
+
+- **Naming:** `<topic>.html` for the deliverable, `<topic>_chat-substitute.html` for the paired chat-substitute (sitting in the same folder).
+- **Trigger:** spin up the paired chat-substitute as soon as you're about to revise an existing deliverable. Don't wait for Jacob to ask "what changed?" — anticipate.
+- **What goes where:** corrections, "I just verified X," "I demoted Y because Z," locked decisions, open questions, and per-render diff pins all live in `<topic>_chat-substitute.html`. The deliverable itself only carries the current best content; superseded prose is removed cleanly rather than left visible with strikethroughs.
+- **Phase boundary:** when iteration wraps (deliverable stable, no open questions), rename `<topic>_chat-substitute.html` → `<topic>_chat-substitute_ARCHIVE.html`. Only start a fresh chat-substitute when iteration resumes.
+- This pattern coexists with the bi-file pattern below: the live chat-substitute can be either standalone or the paired half of a deliverable.
+
+**Concrete incident this rule addresses:** a mask-recommendation session built `Mask_Recommendations.html` as a deliverable and re-rendered it 4+ times in response to pushback. Without a paired chat-substitute, all corrections, demotions, and verifications accreted directly in the deliverable — Jacob couldn't tell what was current vs. superseded. The fix would have been a parallel `Mask_Recommendations_chat-substitute.html` holding per-render diffs, locked decisions, and "pay attention to this" pins, leaving the deliverable clean.
 
 ## Output location
 
-Stable path so reopening hits the same file each time. Default: `<working-directory>/<topic>_review.html`.
+Stable path so reopening hits the same file each time. Default: `<working-directory>/<topic>_chat-substitute.html`.
 
 ## Bi-file pattern (default rhythm)
 
 Iterating reports use two files:
 
-- **`<topic>_review.html`** — live. Slim, only currently open content. Re-rendered fresh each turn; new content goes here, old content moves out.
-- **`<topic>_review_ARCHIVE.html`** — append-only ledger of resolved content with timestamps. Footer of the live file links to it.
+- **`<topic>_chat-substitute.html`** — live. Slim, only currently open content. Re-rendered fresh each turn; new content goes here, old content moves out.
+- **`<topic>_chat-substitute_ARCHIVE.html`** — append-only ledger of resolved content with timestamps. Footer of the live file links to it.
 
 The starting question each render is: *"what is currently open or new?"* — not *"what should I add to what's already here?"* Conservative archival: content Jacob has directly responded to or obviously read moves to the archive; prose he hasn't engaged with stays in the live file until he does.
 
@@ -82,6 +97,7 @@ Before opening the file and saying it's ready:
 3. The "What's new" box matches reality — every claimed change is actually present.
 4. All decision-card legends pass the cold-read test (no session-jargon).
 5. Anchors in "What's new" actually resolve.
+6. **Cold-read scan for status legibility.** Can Jacob locate, in <10 seconds, (a) what's still open, (b) what just locked this turn, (c) what was locked previously? If those three are mixed up or any is buried, demote locked content and refresh the "what's new" pin before showing him. **Failure shape: growth-without-demotion** — each render adds new content but doesn't shed locked weight, until the open surface drowns in resolved status. If the live file is approaching ~600+ lines or >50% of decision cards are locked, the bi-file pattern has been under-used; archive aggressively before rendering again.
 
 ## Don'ts and known failure modes
 

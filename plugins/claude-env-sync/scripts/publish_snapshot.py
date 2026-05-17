@@ -396,6 +396,20 @@ def list_user_skill_bodies(skills_dir: Path, stats: dict) -> list[dict]:
                 if (entry / marker).exists():
                     bundle_status = f"skipped:third_party_marker:{marker}"
                     break
+            # Also check for a .git/ remote pointing at a non-owner repo (covers
+            # skills cloned from someone else's GitHub without a LICENSE file).
+            if bundle_status == "captured":
+                git_config = entry / ".git" / "config"
+                if git_config.exists():
+                    try:
+                        text = git_config.read_text(errors="replace")
+                        m = re.search(r"url\s*=\s*(\S+)", text)
+                        if m:
+                            url = m.group(1).lower()
+                            if "jacob" not in url and "xtzj" not in url:
+                                bundle_status = f"skipped:third_party_git_remote:{m.group(1)}"
+                    except Exception:
+                        pass
 
         files: list[dict] = []
         skipped: list[dict] = []
