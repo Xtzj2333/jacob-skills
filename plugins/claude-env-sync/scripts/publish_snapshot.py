@@ -2,6 +2,17 @@
 """
 publish_snapshot.py — capture a redacted snapshot of a Claude Code environment.
 
+v0.7 adds (on top of v0.6):
+  - Cowork-session skills (~/Library/Application Support/Claude/local-agent-mode-sessions/
+    skills-plugin/*/*/skills/<name>/SKILL.md). Visibility-only — names +
+    descriptions, no bodies. Each entry is tagged with `published_via`:
+      "anthropic-builtin"        — Cowork's bundled built-in (pptx, docx, etc.)
+      "plugin:<plugin>@<mp>"     — also available via marketplace plugin
+      "cowork-only"              — author-local; collaborator must ask the owner
+                                    to publish via sync-cowork-skill to receive it
+    Closes the "env-compare can't see my Cowork skills" gap without leaking
+    personal workflow bodies into the public snapshot.
+
 v0.5 adds (on top of v0.4):
   - Plugin USER CONFIGS (~/.claude/<plugin-name>/*.{json,toml,yaml,yml,ini,conf}).
     Many plugins persist user-tweakable settings outside settings.json — e.g.
@@ -52,7 +63,7 @@ from pathlib import Path
 # plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
 # both whenever the publisher gains or changes a capture. The comparer reads
 # this back and warns if its own SCRIPT_VERSION is older.
-SNAPSHOT_FORMAT_VERSION = "0.6.0"
+SNAPSHOT_FORMAT_VERSION = "0.7.0"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
 SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
@@ -78,6 +89,22 @@ THIRD_PARTY_SKILL_MARKERS = {
 # Explicit per-skill opt-out: drop a file named this at the skill root to keep
 # its body out of snapshots.
 SKILL_BODY_OPTOUT_FILE = ".envsync-skip-body"
+
+# Cowork (claude.ai local-agent mode) ships these skills as built-ins. Tagging
+# them avoids surfacing every Cowork user's pptx/docx/etc as a publish gap.
+# Anything NOT in this set and NOT in a marketplace plugin is treated as
+# author-local ("cowork-only") and only visible to the snapshot owner.
+ANTHROPIC_COWORK_BUILTIN_SKILLS = {
+    "pptx", "docx", "pdf", "xlsx",
+    "schedule",
+    "skill-creator",
+    "setup-cowork",
+}
+
+# Cowork's per-session skill root, relative to ~. The two wildcard segments are
+# session UUIDs that rotate per install — we glob over them so the scan keeps
+# working across Cowork reinstalls.
+COWORK_SKILLS_BASE_REL = Path("Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin")
 
 
 def detect_upstream(skill_dir: Path) -> dict:
@@ -381,6 +408,114 @@ def list_plugin_shipped_skills(home: Path) -> list[dict]:
         seen.add(key)
         deduped.append(s)
     return deduped
+
+
+def list_marketplace_available_skills(home: Path) -> dict:
+    """
+    Walk ~/.claude/plugins/marketplaces/<mp>/plugins/<plugin>/skills/<name>/ to find
+    every skill that's discoverable via an installable marketplace plugin, whether
+    or not the user has actually run `/plugin install` on it yet. Returns a
+    {skill_name: "plugin:<plugin>@<marketplace>"} map.
+
+    Used for the Cowork-skill cross-reference: a Cowork skill is reachable by a
+    collaborator if its name appears in ANY marketplace the snapshot owner has
+    locally cloned — not only ones already installed.
+    """
+    marketplaces = home / ".claude" / "plugins" / "marketplaces"
+    if not marketplaces.is_dir():
+        return {}
+    out: dict = {}
+    for mp in sorted(marketplaces.iterdir()):
+        if not mp.is_dir():
+            continue
+        plugins_dir = mp / "plugins"
+        if not plugins_dir.is_dir():
+            continue
+        for plugin in sorted(plugins_dir.iterdir()):
+            if not plugin.is_dir():
+                continue
+            skills_dir = plugin / "skills"
+            if not skills_dir.is_dir():
+                continue
+            for skill in sorted(skills_dir.iterdir()):
+                if not skill.is_dir():
+                    continue
+                if not (skill / "SKILL.md").exists():
+                    continue
+                # First marketplace to publish a given skill name wins on dedup.
+                out.setdefault(skill.name, f"plugin:{plugin.name}@{mp.name}")
+    return out
+
+
+def list_cowork_skills(home: Path, plugin_skills_by_name: dict, stats: dict) -> list[dict]:
+    """
+    Walk Cowork's per-session skill directories and surface every skill as a
+    visibility-only entry (name + description, no body). Path layout:
+
+        ~/Library/Application Support/Claude/local-agent-mode-sessions/
+            skills-plugin/<session-uuid>/<inner-uuid>/skills/<skill-name>/SKILL.md
+
+    For each skill, sets `published_via` based on whether it's reachable via a
+    plugin install:
+
+      - "anthropic-builtin" : known Cowork built-in (pptx, docx, schedule, ...);
+                              collaborators get it by using Cowork themselves.
+      - "plugin:<p>@<mp>"   : also exists in a marketplace plugin the snapshot
+                              owner has installed → collaborator runs
+                              `/plugin install <p>@<mp>`.
+      - "cowork-only"       : author-local; collaborator can see it exists but
+                              must ask the snapshot owner to publish it via
+                              sync-cowork-skill before it becomes installable.
+
+    Bodies are intentionally NOT bundled — personal Cowork workflows (lab-meeting
+    templates, todo skills, etc.) shouldn't leak into the public snapshot.
+    """
+    base = home / COWORK_SKILLS_BASE_REL
+    if not base.is_dir():
+        return []
+    by_name: dict = {}
+    for session_dir in sorted(base.iterdir()):
+        if not session_dir.is_dir():
+            continue
+        for inner in sorted(session_dir.iterdir()):
+            if not inner.is_dir():
+                continue
+            skills_dir = inner / "skills"
+            if not skills_dir.is_dir():
+                continue
+            for entry in sorted(skills_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                skill_md = entry / "SKILL.md"
+                if not skill_md.exists():
+                    continue
+                if entry.name in by_name:
+                    continue  # first session wins on dedup
+                try:
+                    text = skill_md.read_text(errors="replace")
+                except Exception:
+                    continue
+                description = ""
+                m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
+                if m:
+                    fm = m.group(1)
+                    d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
+                    if d:
+                        description = d.group(1).strip().strip('"').strip("'")
+                # User-authored — pass through redactor for emails/keys, then home-normalize.
+                description = normalize_home(redact_string(description, stats), stats)
+                if entry.name in ANTHROPIC_COWORK_BUILTIN_SKILLS:
+                    published_via = "anthropic-builtin"
+                elif entry.name in plugin_skills_by_name:
+                    published_via = plugin_skills_by_name[entry.name]
+                else:
+                    published_via = "cowork-only"
+                by_name[entry.name] = {
+                    "name": entry.name,
+                    "description": description[:300],
+                    "published_via": published_via,
+                }
+    return sorted(by_name.values(), key=lambda s: s["name"])
 
 
 def list_commands(commands_dir: Path, stats: dict) -> list[dict]:
@@ -716,6 +851,12 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
     user_skills = list_skills(home / ".claude" / "skills", source_label="user")
     user_skill_bodies = list_user_skill_bodies(home / ".claude" / "skills", stats)
     plugin_skills = list_plugin_shipped_skills(home)
+    # For Cowork → plugin cross-reference: prefer installed-plugin source if any,
+    # then fall back to marketplace-available (the user has the clone but hasn't
+    # /plugin install'd yet — collaborator can still install it).
+    plugin_skills_by_name = list_marketplace_available_skills(home)
+    plugin_skills_by_name.update({s["name"]: s["source"] for s in plugin_skills})
+    cowork_skills = list_cowork_skills(home, plugin_skills_by_name, stats)
     commands = list_commands(home / ".claude" / "commands", stats)
     agents = list_agents(home / ".claude" / "agents")
     external_clis = capture_external_cli_inventory()
@@ -736,6 +877,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
     installed_plugins = redact_value(installed_plugins_raw, stats)
     user_skills = redact_value(user_skills, stats)
     plugin_skills = redact_value(plugin_skills, stats)
+    cowork_skills = redact_value(cowork_skills, stats)
     agents = redact_value(agents, stats)
 
     snapshot = {
@@ -758,6 +900,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "skills_user": user_skills,
             "skills_user_bodies": user_skill_bodies,
             "skills_plugin": plugin_skills,
+            "skills_cowork": cowork_skills,
             "commands": commands,
             "agents": agents,
             "installed_plugins": installed_plugins,
@@ -775,6 +918,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "skills_user": "~/.claude/skills/<name>/SKILL.md — names + descriptions (always captured)",
             "skills_user_bodies": "~/.claude/skills/<name>/ — full SKILL.md text + bundled text files; binary or oversized files listed under 'skipped'",
             "skills_plugin": "~/.claude/plugins/cache/<mp>/<plugin>/<ver>/skills/<name>/SKILL.md",
+            "skills_cowork": "~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<session>/<inner>/skills/<name>/SKILL.md — Cowork session skills, visibility-only (no bodies). Each entry tagged published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only.",
             "commands": "~/.claude/commands/<name>.md (frontmatter + body)",
             "agents": "~/.claude/agents/<name>.md",
             "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
@@ -793,6 +937,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "external_clis is best-effort: if `uv` or `brew` isn't installed on this machine the field is null. Receiving machines without those binaries can't act on it; that's fine — the field just won't trigger a diff.",
             "Forward-compat fields (agents, keybindings) may be empty if those directories don't exist on this machine.",
             "plugin_user_configs (v0.5+): captures per-plugin user config under ~/.claude/<plugin-name>/. Top-level files only; binary, oversized, or non-config-suffix files are skipped. Comparer surfaces these so a collaborator can mirror your tuning.",
+            "skills_cowork (v0.7+): names + descriptions of Cowork-session skills. Bodies are NOT bundled — collaborators see what exists and either /plugin install it (when published_via is a plugin) or ask the owner to publish it via sync-cowork-skill (when published_via is cowork-only). 'anthropic-builtin' entries are noise unless you're comparing two non-Cowork machines.",
             "If you spot anything sensitive that wasn't caught, edit this file by hand before committing.",
         ],
     }

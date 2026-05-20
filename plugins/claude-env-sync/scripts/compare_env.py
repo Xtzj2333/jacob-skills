@@ -39,7 +39,7 @@ from pathlib import Path
 # they can detect "snapshot is newer than my comparer" without grepping
 # the script body for capabilities. Bumped together with plugin.json on every
 # feature-affecting change.
-SCRIPT_VERSION = "0.6.0"
+SCRIPT_VERSION = "0.7.0"
 
 CLAUDE_JSON_PUBLISHED_KEYS = {"mcpServers"}
 SAFE_SETTINGS_KEYS = {
@@ -164,6 +164,94 @@ def list_skills(skills_dir: Path, source_label: str) -> list[dict]:
             continue
         out.append({"name": entry.name, "source": source_label})
     return out
+
+
+# Mirrors publish_snapshot.ANTHROPIC_COWORK_BUILTIN_SKILLS / COWORK_SKILLS_BASE_REL.
+# Kept here as a local copy (not imported) because the publisher and the comparer
+# ship as separate skill bundles.
+ANTHROPIC_COWORK_BUILTIN_SKILLS = {
+    "pptx", "docx", "pdf", "xlsx",
+    "schedule",
+    "skill-creator",
+    "setup-cowork",
+}
+COWORK_SKILLS_BASE_REL = Path("Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin")
+
+
+def list_marketplace_available_skills_local(home: Path) -> dict:
+    """Mirror of publish_snapshot.list_marketplace_available_skills."""
+    marketplaces = home / ".claude" / "plugins" / "marketplaces"
+    if not marketplaces.is_dir():
+        return {}
+    out: dict = {}
+    for mp in sorted(marketplaces.iterdir()):
+        if not mp.is_dir():
+            continue
+        plugins_dir = mp / "plugins"
+        if not plugins_dir.is_dir():
+            continue
+        for plugin in sorted(plugins_dir.iterdir()):
+            if not plugin.is_dir():
+                continue
+            skills_dir = plugin / "skills"
+            if not skills_dir.is_dir():
+                continue
+            for skill in sorted(skills_dir.iterdir()):
+                if not skill.is_dir():
+                    continue
+                if not (skill / "SKILL.md").exists():
+                    continue
+                out.setdefault(skill.name, f"plugin:{plugin.name}@{mp.name}")
+    return out
+
+
+def list_cowork_skills_local(home: Path, plugin_skills_by_name: dict) -> list[dict]:
+    """Mirror of publish_snapshot.list_cowork_skills — same shape so self-compare
+    matches. Visibility-only: name + description + published_via."""
+    base = home / COWORK_SKILLS_BASE_REL
+    if not base.is_dir():
+        return []
+    by_name: dict = {}
+    for session_dir in sorted(base.iterdir()):
+        if not session_dir.is_dir():
+            continue
+        for inner in sorted(session_dir.iterdir()):
+            if not inner.is_dir():
+                continue
+            skills_dir = inner / "skills"
+            if not skills_dir.is_dir():
+                continue
+            for entry in sorted(skills_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                skill_md = entry / "SKILL.md"
+                if not skill_md.exists():
+                    continue
+                if entry.name in by_name:
+                    continue
+                try:
+                    text = skill_md.read_text(errors="replace")
+                except Exception:
+                    continue
+                description = ""
+                m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
+                if m:
+                    fm = m.group(1)
+                    d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
+                    if d:
+                        description = d.group(1).strip().strip('"').strip("'")
+                if entry.name in ANTHROPIC_COWORK_BUILTIN_SKILLS:
+                    published_via = "anthropic-builtin"
+                elif entry.name in plugin_skills_by_name:
+                    published_via = plugin_skills_by_name[entry.name]
+                else:
+                    published_via = "cowork-only"
+                by_name[entry.name] = {
+                    "name": entry.name,
+                    "description": description[:300],
+                    "published_via": published_via,
+                }
+    return sorted(by_name.values(), key=lambda s: s["name"])
 
 
 def list_plugin_shipped_skills(home: Path) -> list[dict]:
@@ -452,6 +540,9 @@ def read_local_env() -> dict:
     settings_local = read_json_safe(home / ".claude" / "settings.local.json") or {}
     keybindings = read_json_safe(home / ".claude" / "keybindings.json") or {}
     statusline = read_json_safe(home / ".config" / "ccstatusline" / "settings.json") or {}
+    plugin_skills = list_plugin_shipped_skills(home)
+    plugin_skills_by_name = list_marketplace_available_skills_local(home)
+    plugin_skills_by_name.update({s["name"]: s["source"] for s in plugin_skills})
     raw = {
         "settings_json": settings,
         "settings_local_json": settings_local,
@@ -464,7 +555,8 @@ def read_local_env() -> dict:
         "statusline": statusline,
         "skills_user": list_skills(home / ".claude" / "skills", source_label="user"),
         "skills_user_bodies": list_user_skill_bodies(home / ".claude" / "skills"),
-        "skills_plugin": list_plugin_shipped_skills(home),
+        "skills_plugin": plugin_skills,
+        "skills_cowork": list_cowork_skills_local(home, plugin_skills_by_name),
         "commands": list_commands(home / ".claude" / "commands"),
         "agents": list_agents(home / ".claude" / "agents"),
         "installed_plugins": read_json_safe(home / ".claude" / "plugins" / "installed_plugins.json") or {},
@@ -505,6 +597,22 @@ def diff_named_lists(theirs: list[dict], mine: list[dict]) -> dict:
         "only_theirs": sorted(t - m),
         "only_mine": sorted(m - t),
         "both": sorted(t & m),
+    }
+
+
+def diff_skills_cowork(theirs: list[dict], mine: list[dict]) -> dict:
+    """Diff Cowork-session skills by name. Surfaces published_via on every entry
+    so the renderer can pick the right recommendation per item:
+      - anthropic-builtin → noise (collaborator gets it by using Cowork)
+      - plugin:<p>@<mp>   → recommend `/plugin install`
+      - cowork-only       → recommend the owner publish via sync-cowork-skill
+    """
+    t = {x["name"]: x for x in theirs if "name" in x}
+    m = {x["name"]: x for x in mine if "name" in x}
+    return {
+        "only_theirs": [t[k] for k in sorted(t.keys() - m.keys())],
+        "only_mine": [m[k] for k in sorted(m.keys() - t.keys())],
+        "both": [t[k] for k in sorted(t.keys() & m.keys())],
     }
 
 
@@ -870,6 +978,10 @@ def build_diff(snapshot: dict, local: dict) -> dict:
             env_t.get("skills_plugin", []),
             env_m.get("skills_plugin", []),
         ),
+        "skills_cowork": diff_skills_cowork(
+            env_t.get("skills_cowork", []),
+            env_m.get("skills_cowork", []),
+        ),
         "commands": diff_commands_with_body(
             env_t.get("commands", []),
             env_m.get("commands", []),
@@ -919,6 +1031,15 @@ def build_diff(snapshot: dict, local: dict) -> dict:
     s["user_skills_only_in_mine"] = len(diff["skills_user"]["only_mine"])
     s["plugin_skills_only_in_theirs"] = len(diff["skills_plugin"]["only_theirs"])
     s["plugin_skills_only_in_mine"] = len(diff["skills_plugin"]["only_mine"])
+    cw = diff["skills_cowork"]
+    s["cowork_skills_only_in_theirs"] = len(cw["only_theirs"])
+    s["cowork_skills_only_in_mine"] = len(cw["only_mine"])
+    s["cowork_skills_only_in_theirs_unreachable"] = sum(
+        1 for x in cw["only_theirs"] if x.get("published_via") == "cowork-only"
+    )
+    s["cowork_skills_only_in_mine_unreachable"] = sum(
+        1 for x in cw["only_mine"] if x.get("published_via") == "cowork-only"
+    )
     s["commands_only_in_theirs"] = len(diff["commands"]["only_theirs"])
     s["commands_only_in_mine"] = len(diff["commands"]["only_mine"])
     s["commands_body_diverged"] = len(diff["commands"]["both_diff_body"])
@@ -1061,6 +1182,13 @@ def render_html(diff: dict) -> str:
         f"{s.get('plugins_only_in_mine', 0)} only yours</li>"
     )
     parts.append(
+        f"<li>Cowork-session skills (v0.7): "
+        f"{s.get('cowork_skills_only_in_theirs', 0)} only theirs "
+        f"(<strong>{s.get('cowork_skills_only_in_theirs_unreachable', 0)}</strong> cowork-only, unreachable until owner publishes) · "
+        f"{s.get('cowork_skills_only_in_mine', 0)} only yours "
+        f"(<strong>{s.get('cowork_skills_only_in_mine_unreachable', 0)}</strong> cowork-only)</li>"
+    )
+    parts.append(
         f"<li>Skill bodies (v0.4): "
         f"{s.get('skill_bodies_same', 0)} identical · "
         f"{s.get('skill_bodies_diverged', 0)} diverged · "
@@ -1197,6 +1325,47 @@ def render_html(diff: dict) -> str:
         parts.append("</ul></div>")
     if psk["both"]:
         parts.append(f"<p class='muted'>Both have {len(psk['both'])} plugin-skills (matched on name+source).</p>")
+
+    # Cowork-session skills (v0.7+)
+    parts.append("<h2>Cowork-session skills <span class='muted'>(claude.ai local-agent mode)</span></h2>")
+    cw = diff.get("skills_cowork", {"only_theirs": [], "only_mine": [], "both": []})
+    if not (cw["only_theirs"] or cw["only_mine"] or cw["both"]):
+        parts.append("<p class='muted'>No Cowork-session skills captured on either side "
+                     "(snapshot may pre-date v0.7 — capture added then; or neither user has Cowork installed).</p>")
+    else:
+        def _render_cowork_entry(x):
+            via = x.get("published_via", "?")
+            desc = (x.get("description") or "").strip()
+            desc_html = f" — <span class='muted'>{desc}</span>" if desc else ""
+            if via == "anthropic-builtin":
+                tail = "<span class='tag'>built-in</span> reachable by installing Cowork itself"
+            elif via == "cowork-only":
+                tail = (
+                    "<span class='tag b'>cowork-only</span> not in any plugin — "
+                    "ask the snapshot owner to publish via "
+                    "<code>sync-cowork-skill &lt;name&gt;</code>, "
+                    "or accept it's unreachable"
+                )
+            elif isinstance(via, str) and via.startswith("plugin:"):
+                handle = via[len("plugin:"):]
+                tail = f"reachable via <code>/plugin install {handle}</code>"
+            else:
+                tail = f"<code>published_via={via}</code>"
+            return f"<li><code>{x.get('name','?')}</code>{desc_html} — {tail}</li>"
+
+        if cw["only_theirs"]:
+            parts.append("<div class='theirs-only'><strong>Only in theirs:</strong><ul>")
+            for x in cw["only_theirs"]:
+                parts.append(_render_cowork_entry(x))
+            parts.append("</ul></div>")
+        if cw["only_mine"]:
+            parts.append("<div class='mine-only'><strong>Only in yours:</strong><ul>")
+            for x in cw["only_mine"]:
+                parts.append(_render_cowork_entry(x))
+            parts.append("</ul></div>")
+        if cw["both"]:
+            both_names = ", ".join(f"<code>{x['name']}</code>" for x in cw["both"])
+            parts.append(f"<p class='muted'>Both have: {both_names}</p>")
 
     # Commands
     parts.append("<h2>Slash commands</h2>")

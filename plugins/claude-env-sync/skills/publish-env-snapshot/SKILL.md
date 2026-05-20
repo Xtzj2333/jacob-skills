@@ -1,6 +1,6 @@
 ---
 name: publish-env-snapshot
-description: Capture a redacted snapshot of the user's Claude Code environment (settings.json, settings.local.json, mcpServers from both ~/.claude.json and ~/.claude/.mcp.json, global CLAUDE.md, statusline config, installed user-level + plugin-shipped skills, slash commands with bodies, agents) and publish it to a git repo so collaborators can compare against it. Use when the user says "publish my claude env", "publish my env snapshot", "update my env snapshot", "snapshot my claude setup", "/publish-env-snapshot", or asks to refresh the snapshot a collaborator pulls from.
+description: Capture a redacted snapshot of the user's Claude Code environment (settings.json, settings.local.json, mcpServers from both ~/.claude.json and ~/.claude/.mcp.json, global CLAUDE.md, statusline config, installed user-level + plugin-shipped skills, Cowork-session skills, slash commands with bodies, agents) and publish it to a git repo so collaborators can compare against it. Use when the user says "publish my claude env", "publish my env snapshot", "update my env snapshot", "snapshot my claude setup", "/publish-env-snapshot", or asks to refresh the snapshot a collaborator pulls from.
 ---
 
 # publish-env-snapshot
@@ -19,7 +19,7 @@ A single JSON file (default name: `<owner>_<machine_id>.json` if a machine_id is
 
 ## Snapshot format version
 
-This skill produces v0.3 snapshots (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older v0.1 and v0.2 snapshots gracefully (treats missing fields as empty / falls back to v0.1 key names).
+This skill produces v0.7 snapshots (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older snapshots gracefully (treats missing fields as empty / falls back to older key names). v0.7 added `skills_cowork`: a visibility-only list of skills found in Cowork's per-session skill directory, each tagged `published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only`. Bodies are NOT captured — collaborators see what exists but personal workflow bodies never leak into the public snapshot.
 
 ## Procedure
 
@@ -90,6 +90,7 @@ The script prints a one-line redaction summary to stderr (counts of key-shape ma
 - Statusline config captured (whole file)
 - User-level skills count + 5 sample names
 - Plugin-shipped skills count + 3 sample `<name>@<plugin>` pairs
+- Cowork-session skills count, broken down by `published_via` (anthropic-builtin / plugin:X@mp / cowork-only). Call out any `cowork-only` entries by name — those are author-local and won't be reachable by collaborators until published via `sync-cowork-skill`. Note: only names + descriptions are captured; bodies are NEVER bundled here, so personal Cowork workflows can't leak.
 - Commands count + names + that bodies are captured (and look redacted)
 - Agents count (forward-compat, may be 0)
 - Keybindings captured (forward-compat, may be empty)
