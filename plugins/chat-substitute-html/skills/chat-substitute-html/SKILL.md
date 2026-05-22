@@ -53,15 +53,43 @@ Spin up the archive file on first re-render (not the first render). For a single
 
 ## Page roles, when present
 
-Building blocks of a chat-substitute HTML. Not all renders need all of them — pick what fits.
+Building blocks of a chat-substitute HTML. Not all renders need all of them — pick what fits. **#1 and #3 (title + meta, labeled TOC) are required on every render**; the rest are conditional.
 
-1. **Title + meta** (source path, render number, what changed since last reopen).
+1. **Title + meta** (source path, render number, what changed since last reopen). *Required.*
 2. **"Already done this turn" callout** — completions Jacob doesn't need to act on. Use when the turn produced concrete wins.
-3. **"What's new in this render" pinned surface** — anchor-linked list of deltas since last reopen. Refreshes every render. "New" markers do NOT carry forward.
+3. **Labeled table of contents at the top** — *required on every render, regardless of section count.* The TOC is the primary navigation surface, not an optional convenience. Each `<h2>` (or major section) gets a stable anchor ID and a one-line entry in the TOC. **Each entry carries a status label** so Jacob can scan it cold and know what to attend to first. See "TOC conventions" below for the label vocabulary and layout.
 4. **Status banner** — when the doc has an action state at-a-glance ("ready to ship" vs "in progress"). Use a state pill on a horizontal band. Optional.
-5. **Table of contents** — required for 3+ major sections; each `<h2>` gets a stable anchor ID.
+5. **"What's new in this render" expanded callout** — only when the deltas need more than a TOC label (e.g., a paragraph of context, multiple changes inside one section, a reframe Jacob needs to read before navigating). When TOC labels suffice, skip this — don't duplicate. Refreshes every render. "New" markers do NOT carry forward.
 6. **Body** — organized by section; status/verdict encoded visually for scan.
 7. **Source-file footer** — italic block of paths Jacob can navigate to.
+
+## TOC conventions
+
+The TOC is what Jacob lands on. Treat it as a dashboard, not a list of links.
+
+**Layout:**
+- Sits directly after the title/meta block, before any body content. Never buried.
+- One row per major section. Anchor link on the section title.
+- A status label (pill, chip, or `[NEW]`-style tag) sits inline with each entry — visually separate from the title so the eye can scan the label column independently.
+- Optional one-line gloss after the title for sections whose name alone isn't self-explanatory.
+
+**Label vocabulary** (use the smallest set that fits this render; don't invent new labels turn-to-turn):
+
+| Label | Meaning |
+|---|---|
+| `NEW` | Section added or substantively rewritten this render |
+| `UPDATED` | Existing section with a meaningful change this render (use when "new" overstates it) |
+| `OPEN` | Section contains an unanswered decision ask or unresolved question |
+| `LOCKED` | Decision in this section is locked this render (fresh lock — drop the label next render) |
+| `RESOLVED` | Section's open items closed this render (drop the label next render) |
+| (no label) | Unchanged, no open items — Jacob can skip |
+
+**Per-render hygiene:**
+- Labels reflect *this render's* deltas and current state. `NEW` / `UPDATED` / `LOCKED` / `RESOLVED` do NOT carry forward — strip them next render.
+- `OPEN` persists until the question is answered. Silence is not consent (see per-render rules).
+- If every section is `NEW` because it's the first render, that's fine — but on render 2+, a TOC where everything is labeled `NEW` means the labels aren't doing work. Demote.
+
+**Cold-read test for the TOC:** Jacob walks away for two days, reopens, reads only the TOC. Can he tell, in under 10 seconds, (a) what needs his attention, (b) what's freshly resolved, (c) what's stable background? If not, fix the TOC before showing him.
 
 ## Plain-language section titles and decision-card legends
 
@@ -92,12 +120,13 @@ When all open items in a review resolve, rename the current file with an `_ARCHI
 
 Before opening the file and saying it's ready:
 
-1. **Long-form prose is not inside `<pre>`.** `<pre>` is for code or short ASCII fragments. Prose meant to be read goes in HTML (headings, paragraphs, lists, blockquotes) so it wraps and markdown markers don't render as literal `**` / `---` noise.
-2. No accidental strikethrough, all-bold, or other style bleeds.
-3. The "What's new" box matches reality — every claimed change is actually present.
-4. All decision-card legends pass the cold-read test (no session-jargon).
-5. Anchors in "What's new" actually resolve.
-6. **Cold-read scan for status legibility.** Can Jacob locate, in <10 seconds, (a) what's still open, (b) what just locked this turn, (c) what was locked previously? If those three are mixed up or any is buried, demote locked content and refresh the "what's new" pin before showing him. **Failure shape: growth-without-demotion** — each render adds new content but doesn't shed locked weight, until the open surface drowns in resolved status. If the live file is approaching ~600+ lines or >50% of decision cards are locked, the bi-file pattern has been under-used; archive aggressively before rendering again.
+1. **Labeled TOC is present at the top.** Every render has a TOC immediately after the title block. Every section has an entry. Status labels (`NEW`, `UPDATED`, `OPEN`, `LOCKED`, `RESOLVED`) reflect this render's reality. Stale labels from prior renders are stripped.
+2. **Long-form prose is not inside `<pre>`.** `<pre>` is for code or short ASCII fragments. Prose meant to be read goes in HTML (headings, paragraphs, lists, blockquotes) so it wraps and markdown markers don't render as literal `**` / `---` noise.
+3. No accidental strikethrough, all-bold, or other style bleeds.
+4. Any "What's new" expanded callout (when used) matches reality — every claimed change is actually present.
+5. All decision-card legends pass the cold-read test (no session-jargon).
+6. All TOC anchors and any "What's new" anchors actually resolve.
+7. **Cold-read scan for status legibility.** Reading only the TOC, can Jacob locate, in <10 seconds, (a) what's still open, (b) what just locked this turn, (c) what was locked previously? If those three are mixed up or any is buried, demote locked content and refresh TOC labels before showing him. **Failure shape: growth-without-demotion** — each render adds new content but doesn't shed locked weight, until the open surface drowns in resolved status. If the live file is approaching ~600+ lines or >50% of decision cards are locked, the bi-file pattern has been under-used; archive aggressively before rendering again.
 
 ## Don'ts and known failure modes
 
