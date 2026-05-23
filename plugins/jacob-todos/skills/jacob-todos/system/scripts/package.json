@@ -1,0 +1,8 @@
+{
+  "name": "jacob-todos-scripts",
+  "private": true,
+  "description": "Runtime dependencies for the to-do system generators. Install with `npm install` inside this scripts/ folder.",
+  "dependencies": {
+    "marked": "^18.0.3"
+  }
+}

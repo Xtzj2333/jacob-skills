@@ -1,0 +1,73 @@
+{
+  "schema_version": 3,
+  "_about": "Live system state. Read first; do not hard-code values that appear here. The Google Calendar IDs / user email under `calendar_config` are the only fields a new user MUST fill in before first run.",
+
+  "calendar_config": {
+    "_about": "Was originally hard-coded in gcal_todo_instructions.md; moved here so a new user can fill these in without editing prose. Fill in your own calendars before the first Google-Calendar-touching run.",
+    "user_email": "<your-primary-google-account-email>",
+    "todo_calendars": [
+      {
+        "name": "<display name, e.g. Events>",
+        "id": "<calendar id or primary email>",
+        "color": "<color hint, optional>",
+        "role": "main",
+        "notes": "Main to-do calendar. Personal tasks, reminders, things to do."
+      },
+      {
+        "name": "<display name, e.g. Really Important Tasks>",
+        "id": "<group calendar id @group.calendar.google.com>",
+        "color": "<color hint, optional>",
+        "role": "priority",
+        "notes": "High-priority one-off tasks."
+      }
+    ],
+    "excluded_calendars": [
+      {
+        "name": "<display name, e.g. Meetings>",
+        "id": "<calendar id>",
+        "reason": "Scheduled meetings with other people — never to-dos."
+      }
+    ]
+  },
+
+  "last_run": null,
+  "last_check_in": null,
+  "last_consolidation_date": null,
+  "consolidation_day": null,
+  "stacking_day": null,
+  "task_count": 0,
+  "done_count": 0,
+  "docx_filename": null,
+
+  "pruning_rules": {
+    "archive_docx_max": 10,
+    "archive_docx_pattern": "to do *.docx",
+    "archive_docx_keep": "newest N, delete oldest when count > max",
+    "archive_docx_exclude": [],
+    "check_in_reports_max": 10,
+    "check_in_reports_pattern": "to do/check_in_*.md",
+    "enforce_after": [
+      "consolidation",
+      "update-to-do",
+      "scheduled-check-in"
+    ]
+  },
+
+  "last_update_to_do": null,
+  "last_recommendations_run": null,
+  "last_consolidation": null,
+
+  "recent_notes": [],
+
+  "landmarks": {
+    "_about": "Named future dates used as `snooze_until` targets (e.g. 'move_day', 'semester_start'). Empty by default; you add entries like \"move_day\": \"2026-08-15\" as they become relevant."
+  },
+
+  "thresholds": {
+    "rollover_decision_card_at": 3,
+    "rollover_force_retype_at": 5,
+    "untracked_event_backlog_warn": 12,
+    "untracked_event_backlog_crit": 24,
+    "stacked_closure_threshold": 4
+  }
+}

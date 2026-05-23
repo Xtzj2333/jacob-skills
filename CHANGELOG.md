@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-05-22 — `jacob-todos` v0.2 (full system bundled, not just SKILL.md)
+
+**TL;DR:** `jacob-todos` previously shipped trigger-only (just `SKILL.md`). v0.2 bundles the real machinery — scripts, instruction docs, sanitized JSON templates — under `skills/jacob-todos/system/`, with a first-time-setup section in `SKILL.md` that scaffolds `<workspace>/to do/` on demand. Calendar IDs are no longer hard-coded in `gcal_todo_instructions.md`; they live in `state_v3.json.calendar_config` so a new user fills them in once.
+
+### `jacob-todos` v0.2
+
+- **Bundled `system/` folder** beside `SKILL.md` with:
+  - `state_v3.template.json`, `tasks_v3.template.json` — empty/example templates (no personal data).
+  - `cowork_instructions.md`, `gcal_todo_instructions.md`, `MAP.md` — genericized; calendar-specific values moved into `state_v3.json.calendar_config`.
+  - `scripts/build_check_in.js`, `build_per_task_recs.js`, `pickup_actions.js`, `parse_comments.py`, `task_verbs.js`, `package.json` — copied as-is (no hard-coded personal paths or IDs).
+- **First-time setup section in `SKILL.md`.** Triggers on "set up the to-do system" / "install jacob-todos" / "scaffold the to-do system". Walks Claude through: create the workspace folder structure, copy templates into place, `npm install` inside `scripts/`, prompt the user to fill in `calendar_config`, run the first check-in.
+- **Sanitization.** Live `tasks_v3.json` and `state_v3.json` are NOT shipped — replaced with 2-task and defaults-only templates respectively. Real calendar IDs, primary email, personal contact names, and project content are removed.
+- **plugin.json now carries a `version` field** (was missing).
+
+### Pickup on the collaborator side
+
+- `/plugin marketplace update` then `/plugin install jacob-todos@jacob-skills` (or just `/plugin update jacob-todos`).
+- After install: "set up the to-do system" in chat — Claude reads the new SKILL.md, scaffolds `<workspace>/to do/`, and prompts for `calendar_config` values.
+
+---
+
 ## 2026-05-12 — `claude-env-sync` v0.4 (skill bodies + external CLIs) and manifest-version bump
 
 **TL;DR:** `claude-env-sync` now captures (a) full SKILL.md + bundled-file content for personal skills under `~/.claude/skills/`, and (b) an external CLI inventory (`uv tool list` + `brew leaves`) so the diff flags binaries that MCP servers depend on. Also: the plugin manifest version is now bumped on every release (the v0.4 code shipped initially without a manifest bump, so `/plugin install` was a silent no-op — fixed in commit following `cf6c7bf`).

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "t001",
+    "rank": 1,
+    "title": "Example task with a deadline",
+    "desc": "This is a placeholder so the system has data to render on first run. Delete it once you've added a real task. The `desc` field is free-form prose; line breaks are preserved.",
+    "comment": "Free-form note for yourself or for Claude. Used as context when generating the suggested plan.",
+    "category": "personal",
+    "deadline": "2099-01-01",
+    "timeEstimate": 20,
+    "status": "open",
+    "commitToday": false,
+    "solution_eligibility": "eligible",
+    "solution_status": "fresh-pending-review",
+    "solution": "## One-line verdict\nReplace this example with a real task — open `check_in.html` in your browser to see what the page looks like.\n\n## Steps\n1. Edit `scripts/tasks_v3.json` (this file).\n2. Run `node scripts/build_check_in.js` to regenerate the page.\n3. Run `node scripts/build_per_task_recs.js` to regenerate the per-task rec pages.\n",
+    "solution_questions": [],
+    "solution_generated_at": null,
+    "solution_confidence": "high",
+    "solution_sources": [],
+    "rollover_count": 0,
+    "last_status_change": null,
+    "snooze_until": null,
+    "review_cadence_days": 14,
+    "entry_2min": null,
+    "cancel_reason": null,
+    "user_comments": []
+  },
+  {
+    "id": "t002",
+    "rank": 2,
+    "title": "Example task with subtasks",
+    "desc": "Tasks with logical sub-items can carry them inside a `subtasks: [{text, done}]` array. `pickup_actions.js` auto-marks the parent done when every subtask is checked.",
+    "subtasks": [
+      {
+        "text": "First sub-step",
+        "done": false
+      },
+      {
+        "text": "Second sub-step",
+        "done": false
+      }
+    ],
+    "category": "logistics",
+    "deadline": null,
+    "timeEstimate": 30,
+    "status": "open",
+    "commitToday": false,
+    "solution_eligibility": "self-evident",
+    "solution_status": "n/a",
+    "solution": null,
+    "solution_questions": [],
+    "solution_generated_at": null,
+    "solution_confidence": null,
+    "rollover_count": 0,
+    "last_status_change": null,
+    "snooze_until": null,
+    "review_cadence_days": 14,
+    "entry_2min": null,
+    "cancel_reason": null,
+    "user_comments": []
+  }
+]
