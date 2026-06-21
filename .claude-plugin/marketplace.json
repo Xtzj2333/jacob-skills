@@ -92,6 +92,11 @@
       "name": "vector-stimulus-design",
       "source": "./plugins/vector-stimulus-design",
       "description": "Use when generating parameterized research stimuli from designer vector source files (Adobe Illustrator .ai, .svg). Covers lossless extraction, shape editing, color permutation, rasterization, reproducibility, and the review workflow for collaborating with a researcher on stimulus choice."
+    },
+    {
+      "name": "migrate-claude-chats",
+      "source": "./plugins/migrate-claude-chats",
+      "description": "Transfer/migrate Claude Code chat history from one Mac (or user account) to another and make the moved chats work in agent view. Fixes the cwd-rewrite trap that causes \"Session can't start\" / \"session is not responding\" crash-loops on /bg. Ships scripts/fix_chat_cwd.py (dry-run, per-file safety gate, stale bridge-marker cleanup)."
     }
   ]
 }

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migrate Claude Code chats between Macs — reference</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--ink:#e7e9ee;--muted:#9aa3b2;--line:#2a2f3a;
+    --accent:#7aa2ff;--good:#56d364;--warn:#e3b341;--bad:#f97583;--code:#0b0d11;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:38px 24px 80px;}
+  h1{font-size:25px;margin:0 0 4px;letter-spacing:-.01em;}
+  .sub{color:var(--muted);margin:0 0 20px;font-size:15px;}
+  h2{font-size:18px;margin:30px 0 6px;color:#dbe7ff;}
+  p{margin:9px 0;}
+  code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;font:12.5px/1.5 ui-monospace,Menlo,monospace;color:#e7eaf0;}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:9px;padding:11px 13px;overflow:auto;margin:6px 0 12px;}
+  pre code{background:none;border:0;padding:0;font-size:12.5px;color:#dfe4ee;white-space:pre;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:14px 0;}
+  .note{border-left:3px solid var(--accent);background:rgba(122,162,255,.07);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0;color:#cfd6e4;font-size:14px;}
+  .warn{border-left:3px solid var(--warn);background:rgba(227,179,65,.08);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px;}
+  .warn b{color:var(--warn);}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13.5px;}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;}
+  th{background:var(--panel2);color:#cdd3de;}
+  .step{font-weight:700;color:#fff;margin:18px 0 2px;font-size:15.5px;}
+  .kbd{display:inline-block;background:#222733;border:1px solid #39414f;border-bottom-width:2px;border-radius:6px;padding:0 7px;font:12px/1.7 ui-monospace,Menlo,monospace;color:#e7eaf0;}
+  .footer{color:var(--muted);font-size:12.5px;margin-top:26px;font-style:italic;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Migrate Claude Code chats between Macs</h1>
+  <p class="sub">Human-readable companion to the <code>migrate-claude-chats</code> skill. The skill automates this; this page explains what it does and why.</p>
+
+  <div class="card" style="border-color:#2f5d3a;background:linear-gradient(180deg,#15301d,#16241b)">
+    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">The one trap that breaks everything</div>
+    <p style="margin:4px 0">Agent view (<code>claude agents</code>) re-hosts a backgrounded chat <b>in the working directory recorded inside the transcript</b> — not where you launched it. A chat copied from another Mac still has that old machine's path baked in (<code>/Users/&lt;olduser&gt;/…</code>), which doesn't exist on the new Mac. So it resumes fine in a terminal (you supply a live folder with <code>cd</code>) but <b>crash-loops in agent view</b>: <i>“Session can't start — source session …”</i> / <i>“session is not responding, restarting it.”</i> The repair rewrites that recorded path. That's the whole game.</p>
+  </div>
+
+  <h2>How chats are stored</h2>
+  <table>
+    <tr><th>Item</th><th>Where / what</th></tr>
+    <tr><td>Transcript file</td><td><code>~/.claude/projects/&lt;encoded-cwd&gt;/&lt;session-uuid&gt;.jsonl</code></td></tr>
+    <tr><td>Encoded folder name</td><td>the chat's absolute working dir with every non-alphanumeric char → <code>-</code>: <code>re.sub(r'[^A-Za-z0-9]','-', abspath)</code></td></tr>
+    <tr><td>Per-line <code>"cwd"</code></td><td>the dir agent view respawns the session in — <b>the field the repair rewrites</b></td></tr>
+    <tr><td>Send to agent view</td><td><code>/bg</code> or the <span class="kbd">←</span> left-arrow (identical)</td></tr>
+  </table>
+
+  <h2>The procedure (in order)</h2>
+
+  <div class="step">1 · Copy the transcripts to the new Mac</div>
+  <p>From the old Mac, copy the relevant <code>~/.claude/projects/&lt;folder&gt;/</code> directories (or individual <code>.jsonl</code> files) via iCloud Drive, AirDrop, or <code>scp</code> into a staging area. <b>Keep an untouched backup</b> — your safety net.</p>
+
+  <div class="step">2 · Re-home each chat to the folder matching where its files now live</div>
+  <p>Pick the chat's real project directory on the new Mac, compute <code>enc(that-abspath)</code>, and put the <code>.jsonl</code> in <code>~/.claude/projects/&lt;enc&gt;/</code>. To make a chat resume “on top of” a synced project folder, its encoded folder must match that folder's path.</p>
+
+  <div class="step">3 · Run the repair (dry-run first)</div>
+  <pre><code># PREVIEW — change nothing
+python3 scripts/fix_chat_cwd.py \
+  --map "/Users/OLDUSER/Claude=>/Users/NEWUSER/Library/Mobile Documents/com~apple~CloudDocs/Sync workspace/Claude" \
+  --filter "Sync-workspace-Claude" --dry-run
+
+# APPLY — with a fresh backup
+python3 scripts/fix_chat_cwd.py \
+  --map "/Users/OLDUSER/Claude=>/Users/NEWUSER/Library/Mobile Documents/com~apple~CloudDocs/Sync workspace/Claude" \
+  --filter "Sync-workspace-Claude" \
+  --backup-dir ~/chat-migration-backup</code></pre>
+  <p>It rewrites old→new on every line, drops stale <code>bridge-session</code> markers, remaps dead deeper/worktree cwds up to the nearest existing ancestor, and <b>only writes a file when the result is provably consistent</b> (home cwd exists AND encodes to its own folder). Anything else is left untouched and FLAGGED for you to look at. Pass multiple <code>--map</code> prefixes if chats came from several old locations.</p>
+
+  <div class="step">4 · Verify</div>
+  <p>Confirm the session-ID set still matches your backup (expect zero missing), and that no transcript still holds the old <code>/Users/OLDUSER</code> path or a home cwd that doesn't match its folder. The script's summary plus a quick re-scan covers it.</p>
+
+  <div class="step">5 · Resume, then background</div>
+  <pre><code>cd "/path/to/its/project/folder" && claude --resume &lt;session-uuid&gt;
+# wait for load, then at the empty prompt:
+/bg          # (or press the ← left-arrow)</code></pre>
+  <p>Agent view opens with the chat listed. Re-attach later from <code>claude agents</code> with <span class="kbd">→</span>/Enter. Big transcripts (tens of MB) take 10–20s to load — that's size, not a hang.</p>
+
+  <div class="warn"><b>Critical ordering:</b> run the repair <b>before</b> you background anything. A live, backgrounded session legitimately contains a <code>bridge-session</code> line — that's running state, and the script strips it. Fix dormant chats only; the copy→fix→resume→bg order avoids the problem naturally.</div>
+
+  <h2>Gotchas worth remembering</h2>
+  <ul>
+    <li><b><code>/bg</code> vs arrow key is a red herring</b> — both background the session. Agent-view failures are about the recorded cwd.</li>
+    <li><b>Don't pick a chat by title or size alone</b> — duplicate titles exist; use distinctive last-message content or the session ID.</li>
+    <li><b>The encoding is lossy</b> — spaces, slashes, and dots all become <code>-</code>. Always derive a folder by <i>encoding</i> a known path, never by decoding the folder name.</li>
+    <li><b>Subfolder & deleted-worktree cwds</b> are the tricky cases; the script's safety gate catches them and either remaps to a valid ancestor or flags the file rather than guessing.</li>
+  </ul>
+
+  <p class="footer">Companion to the <code>migrate-claude-chats</code> skill (jacob-skills marketplace). Built from a real 271-transcript move (old user <code>jacobzhang</code> → new Mac <code>jacq</code>, chats re-homed under iCloud <code>Sync workspace/Claude</code>).</p>
+
+</div>
+</body>
+</html>

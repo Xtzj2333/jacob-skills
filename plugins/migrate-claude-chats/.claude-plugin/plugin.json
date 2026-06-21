@@ -1,0 +1,7 @@
+{
+  "name": "migrate-claude-chats",
+  "description": "Use when transferring/migrating Claude Code chat history from one Mac (or user account) to another, and the moved chats fail in agent view — \"Session can't start — source session ...\", \"session is not responding, restarting it\", a crash-loop after /bg or the left-arrow, or chats that resume in the terminal but won't background. Covers copying transcripts, re-homing them to the right project folder, and the cwd-rewrite repair (scripts/fix_chat_cwd.py) that makes agent view work.",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}

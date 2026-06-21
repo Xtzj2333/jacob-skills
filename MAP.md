@@ -56,6 +56,7 @@ plugins/<name>/
 - **Collaborator-facing (8):** `research-27`, `citation-deepening`, `source-quality-check`, `commented-edit-roundtrip`, `revision-queue`, `tony-github-push`, `calendar-search`, `project-map`.
 - **Utility called by other skills (1):** `project-filename` (filename convention; not user-triggered).
 - **Jacob-internal (2):** `sync-cowork-skill`, `claude-env-sync`. Published in the marketplace for Jacob's own machines but documented as "not useful to collaborators" in `SKILLS_OVERVIEW.md`.
+- **Ops tooling (1):** `migrate-claude-chats` (transfer Claude Code chats between Macs + the cwd-rewrite repair that makes agent view work; ships `scripts/fix_chat_cwd.py`). Generic — useful to collaborators too.
 
 ## Git / share status
 
