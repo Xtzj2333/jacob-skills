@@ -7,8 +7,10 @@
 //   node pickup_actions.js path/to.json  # explicit file
 //
 // Actions schema (per item in payload.actions):
-//   { task_id, verb: 'done'|'cancel'|'snooze'|'comment'|'subtask_update',
-//     reason?, until?, comment?, subtasks_checked?: [indices] }
+//   { task_id, verb: 'done'|'cancel'|'snooze'|'comment'|'subtask_update'|'status',
+//     reason?, until?, comment?, subtasks_checked?: [indices], status? }
+//   'status' sets work_status (not_started|blocked|in_progress|completed);
+//   'completed' also closes the task.
 //
 // "until" for snooze can be: YYYY-MM-DD, a landmark in state_v3.json,
 // or a small set of natural phrases (tomorrow / next monday / +N days / etc.).
@@ -182,6 +184,10 @@ function main() {
           try { verbs.done(task_id); results.applied.push({ task_id, verb: 'auto_done_via_subtasks' }); }
           catch (e) { /* may already be done */ }
         }
+      } else if (verb === 'status') {
+        const r = verbs.setStatus(task_id, action.status);
+        results.applied.push({ task_id, verb: 'status', ...r });
+        if (action.comment) { applyComment(task_id, action.comment); results.applied.push({ task_id, verb: 'comment', text: action.comment }); }
       } else {
         results.skipped.push({ task_id, verb, reason: `unknown verb: ${verb}` });
       }

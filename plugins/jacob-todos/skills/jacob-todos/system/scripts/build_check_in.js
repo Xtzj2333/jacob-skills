@@ -46,6 +46,21 @@ function deadlinePill(task) {
   return `<span class="dl-pill ${cls}"><span class="dl-date">⏰ ${task.deadline}</span><span class="dl-rel">${label}</span></span>`;
 }
 
+// Google-Tasks-style work-status control. Renders an empty wrapper carrying the
+// current status; the page JS turns it into a clickable colored pill + dropdown.
+// Statuses: not_started | blocked | in_progress | completed (Completed = done).
+const WORK_STATUSES = ['not_started', 'blocked', 'in_progress', 'completed'];
+function statusControl(task) {
+  const st = WORK_STATUSES.includes(task.work_status) ? task.work_status : 'not_started';
+  return `<span class="status-wrap" data-status="${st}" data-orig-status="${st}"></span>`;
+}
+
+// A task's organizational tags (optional `tags[]` array — e.g. project names,
+// areas, contexts). Rendered as pills and used by the tag-filter bar.
+function taskTags(task) {
+  return Array.isArray(task.tags) ? [...new Set(task.tags.filter(Boolean))] : [];
+}
+
 function renderTask(task) {
   const id = task.id;
   const decisionId = `task-${id}`;
@@ -54,6 +69,7 @@ function renderTask(task) {
   const titleClass = task.deadline && daysFrom(task.deadline) < 0 ? 'task-title is-overdue' : 'task-title';
   const todayFlag = task.commitToday ? '<span class="pill today-pill">today</span>' : '';
   const cat = task.category ? `<span class="pill cat-${task.category}">${escapeHtml(task.category)}</span>` : '';
+  const tagPills = taskTags(task).map(t => `<span class="pill tag-pill">#${escapeHtml(t)}</span>`).join('');
   const time = task.timeEstimate ? `<span class="meta-bit">~${task.timeEstimate} min</span>` : '';
   const desc = task.desc ? `<p class="task-desc">${escapeHtml(task.desc).replace(/\n/g, '<br>')}</p>` : '';
 
@@ -89,16 +105,15 @@ function renderTask(task) {
     ? `<div class="rec-link-wrap"><a class="rec-link" href="recs/rec_${id}.html" target="_blank" rel="noopener">View suggested plan →</a></div>`
     : '';
 
-  // No "Done" radio when subtasks exist — done is reached by checking subtasks
-  const radios = hasSubtasks
-    ? `<label><input type="radio" name="${formName}" value="cancel"><span class="opt-text">✗ Cancel</span></label>
-        <label><input type="radio" name="${formName}" value="snooze"><span class="opt-text">⏸ Snooze</span></label>`
-    : `<label><input type="radio" name="${formName}" value="done"><span class="opt-text">✓ Done</span></label>
-        <label><input type="radio" name="${formName}" value="cancel"><span class="opt-text">✗ Cancel</span></label>
+  // No "Done" radio anymore — "Completed" in the status dropdown marks a task
+  // done (and subtask-bearing tasks auto-close when all subtasks are checked).
+  // Cancel & Snooze remain as one-off actions.
+  const radios =
+    `<label><input type="radio" name="${formName}" value="cancel"><span class="opt-text">✗ Cancel</span></label>
         <label><input type="radio" name="${formName}" value="snooze"><span class="opt-text">⏸ Snooze</span></label>`;
 
   return `
-  <details class="task-row" data-task-id="${id}">
+  <details class="task-row" data-task-id="${id}" data-tags="${escapeHtml(taskTags(task).join(' '))}">
     <summary>
       <span class="task-summary-left">
         <span class="${titleClass}">${escapeHtml(task.title)}</span>
@@ -106,6 +121,7 @@ function renderTask(task) {
         <span class="answer-chip" id="chip-${decisionId}"></span>
       </span>
       <span class="task-summary-right">
+        ${statusControl(task)}
         ${deadlinePill(task)}
       </span>
     </summary>
@@ -113,6 +129,7 @@ function renderTask(task) {
       <div class="task-meta-row">
         ${time}
         ${cat}
+        ${tagPills}
       </div>
       ${desc}
       ${subtasksBlock}
@@ -148,6 +165,9 @@ const stats = {
   today: todayBucket.length,
   overdue: active.filter(t => t.deadline && daysFrom(t.deadline) < 0).length,
 };
+
+// Distinct organizational tags across active tasks (for the filter bar).
+const allTags = [...new Set(active.flatMap(taskTags))].sort();
 
 const html = `<!doctype html>
 <html lang="en">
@@ -193,7 +213,7 @@ const html = `<!doctype html>
   .task-row[open] > summary::before { content: "▾"; }
   .task-row > summary:hover { background: #f8f6ec; }
   .task-summary-left { display: flex; align-items: center; gap: 10px; flex: 1; flex-wrap: wrap; min-width: 0; }
-  .task-summary-right { flex-shrink: 0; }
+  .task-summary-right { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
   .task-title { font-weight: 600; font-size: 15.5px; }
   .task-title.is-overdue { color: var(--del); }
 
@@ -225,6 +245,41 @@ const html = `<!doctype html>
   .pill.cat-health    { background: #fbe4e4; color: #7a1f1f; }
   .pill.cat-leisure   { background: #e2f7f0; color: #1a5e57; }
   .pill.cat-meta      { background: #f0f0f0; color: #555; }
+  .pill.tag-pill      { background: #d8efe9; color: #155e54; }
+
+  /* ---- work-status dropdown (Google-Tasks style) ---- */
+  .status-wrap { position: relative; flex: none; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+    padding: 5px 11px; border-radius: 14px; border: 1px solid transparent; cursor: pointer;
+    font-family: inherit; white-space: nowrap; transition: filter .12s, box-shadow .12s;
+  }
+  .status-pill:hover { filter: brightness(.97); }
+  .status-pill:focus-visible { outline: none; box-shadow: 0 0 0 2px #4a90d9; }
+  .status-pill .caret2 { font-size: 9px; opacity: .65; }
+  .st-not_started { background: #e8eaed; color: #3c4043; }
+  .st-blocked     { background: #fad2cf; color: #b3261e; }
+  .st-in_progress { background: #feefc3; color: #7a5900; }
+  .st-completed   { background: #ceead6; color: #137333; }
+  .status-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 200; background: #fff;
+    border: 1px solid #dadce0; border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,.16);
+    padding: 8px; min-width: 196px; display: none;
+  }
+  .status-menu.open { display: block; }
+  .status-menu .mi { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+  .status-menu .mi:hover { background: #f1f3f4; }
+  .status-menu .mi .check { width: 16px; flex: none; color: #1a1a1a; font-weight: 700; font-size: 14px; text-align: center; visibility: hidden; }
+  .status-menu .mi.sel .check { visibility: visible; }
+  .status-menu .mi .opt { font-size: 13px; font-weight: 600; padding: 4px 11px; border-radius: 13px; }
+
+  /* ---- tag filter bar ---- */
+  .tag-filter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 18px; }
+  .tag-filter .tf-label { color: var(--muted); font-size: 13px; margin-right: 4px; }
+  .tf-chip { font-size: 12px; padding: 4px 11px; border: 1px solid #cdbf86; background: #fff;
+    border-radius: 14px; cursor: pointer; color: #5a4a1a; font-family: inherit; }
+  .tf-chip:hover { background: #fffae0; }
+  .tf-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
   .answer-chip {
     font-size: 11px; padding: 2px 8px; border-radius: 9px;
@@ -326,6 +381,12 @@ const html = `<!doctype html>
   Click a task. Pick an option or type a comment. Hit <strong>Download JSON</strong> when done, then say <strong>"pick up my answers"</strong> in chat.
 </div>
 
+${allTags.length ? `<div class="tag-filter" id="tag-filter">
+  <span class="tf-label">Filter by tag:</span>
+  <button type="button" class="tf-chip active" data-tag="__all__">All</button>
+  ${allTags.map(t => `<button type="button" class="tf-chip" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</button>`).join('')}
+</div>` : ''}
+
 <h2 id="today">📌 For today &mdash; ${todayBucket.length}</h2>
 <p class="sub">Committed today or due in the next 3 days.</p>
 ${todayBucket.map(renderTask).join('\n')}
@@ -373,13 +434,18 @@ ${otherBucket.map(renderTask).join('\n')}
     const subtaskBoxes = taskRow.querySelectorAll('.subtasks input[type="checkbox"]');
     const subtasksChecked = [];
     subtaskBoxes.forEach((cb, i) => { if (cb.checked) subtasksChecked.push(parseInt(cb.dataset.subtask, 10)); });
+    const sw = taskRow.querySelector('.status-wrap');
+    const status = sw ? sw.dataset.status : null;
+    const origStatus = sw ? sw.dataset.origStatus : null;
     return {
       decisionId,
       task_id: taskId,
       choice: radio?.value || null,
       comment: ta?.value?.trim() || '',
       hasSubtasks: subtaskBoxes.length > 0,
-      subtasksChecked
+      subtasksChecked,
+      status,
+      statusChanged: !!(sw && status !== origStatus)
     };
   }
 
@@ -406,9 +472,10 @@ ${otherBucket.map(renderTask).join('\n')}
           if (cb) cb.checked = true;
         });
       }
+      if (v.status) { const sw = row.querySelector('.status-wrap'); if (sw) sw.dataset.status = v.status; }
       updateChip(id);
       // auto-expand any task that has an answer
-      const hasAnything = v.choice || v.comment || (v.subtasksChecked && v.subtasksChecked.length);
+      const hasAnything = v.choice || v.comment || (v.subtasksChecked && v.subtasksChecked.length) || v.status;
       if (hasAnything) row.open = true;
     });
   }
@@ -435,14 +502,14 @@ ${otherBucket.map(renderTask).join('\n')}
     const state = readAll();
     const total = Object.keys(state).length;
     const answered = Object.values(state).filter(v =>
-      v.choice || v.comment || (v.subtasksChecked && v.subtasksChecked.length)
+      v.choice || v.comment || (v.subtasksChecked && v.subtasksChecked.length) || v.statusChanged
     ).length;
     const el = document.getElementById('progress');
     if (el) el.textContent = \`\${answered} / \${total} answered\`;
   }
 
   function isEmptyState(s) {
-    return !s.choice && !s.comment && !(s.subtasksChecked && s.subtasksChecked.length);
+    return !s.choice && !s.comment && !(s.subtasksChecked && s.subtasksChecked.length) && !s.statusChanged;
   }
 
   function persistRow(row) {
@@ -475,16 +542,13 @@ ${otherBucket.map(renderTask).join('\n')}
     const actions = [];
     Object.values(state).forEach(v => {
       const hasSubtaskActivity = v.hasSubtasks && v.subtasksChecked.length > 0;
-      if (!v.choice && !v.comment && !hasSubtaskActivity) return;
-      const a = { task_id: v.task_id };
-      if (v.choice === 'done')   a.verb = 'done';
-      else if (v.choice === 'cancel') { a.verb = 'cancel'; if (v.comment) a.reason = v.comment; }
-      else if (v.choice === 'snooze') { a.verb = 'snooze'; if (v.comment) a.until = v.comment; }
-      else if (hasSubtaskActivity)    a.verb = 'subtask_update';
-      else if (v.comment)             a.verb = 'comment';
-      if (v.comment && v.choice !== 'cancel' && v.choice !== 'snooze') a.comment = v.comment;
-      if (hasSubtaskActivity) a.subtasks_checked = v.subtasksChecked;
-      actions.push(a);
+      // Cancel / Snooze are terminal one-offs — emit only that, comment as its arg.
+      if (v.choice === 'cancel') { const a = { task_id: v.task_id, verb: 'cancel' }; if (v.comment) a.reason = v.comment; actions.push(a); return; }
+      if (v.choice === 'snooze') { const a = { task_id: v.task_id, verb: 'snooze' }; if (v.comment) a.until = v.comment; actions.push(a); return; }
+      // Otherwise status change / subtasks / comment can co-occur — emit each.
+      if (hasSubtaskActivity) actions.push({ task_id: v.task_id, verb: 'subtask_update', subtasks_checked: v.subtasksChecked });
+      if (v.statusChanged)    actions.push({ task_id: v.task_id, verb: 'status', status: v.status });
+      if (v.comment)          actions.push({ task_id: v.task_id, verb: 'comment', comment: v.comment });
     });
     return actions;
   }
@@ -495,6 +559,7 @@ ${otherBucket.map(renderTask).join('\n')}
     let md = \`# Check-in answers for \${new Date().toISOString().slice(0,10)}\\n\\n\`;
     actions.forEach(a => {
       md += \`- **\${a.task_id}** — \${a.verb}\`;
+      if (a.status) md += \` (status: \${a.status})\`;
       if (a.reason) md += \` (reason: \${a.reason})\`;
       if (a.until)  md += \` (until: \${a.until})\`;
       if (a.comment) md += \` — \${a.comment}\`;
@@ -528,6 +593,8 @@ ${otherBucket.map(renderTask).join('\n')}
     if (!confirm('Clear all answers on this page?')) return;
     document.querySelectorAll('.decision-form input[type="radio"]').forEach(r => { r.checked = false; r._lastChecked = false; });
     document.querySelectorAll('.decision-form textarea').forEach(t => t.value = '');
+    document.querySelectorAll('.status-wrap').forEach(sw => { sw.dataset.status = sw.dataset.origStatus; });
+    renderStatusControls();
     // NOTE: subtask checkboxes are NOT cleared by Clear-all because their initial state
     // comes from tasks_v3.json (some may have been done previously). Click each one to toggle.
     document.querySelectorAll('.answer-chip').forEach(c => { c.className = 'answer-chip'; c.textContent = ''; });
@@ -575,8 +642,56 @@ ${otherBucket.map(renderTask).join('\n')}
     });
   }
 
+  // ---- work-status dropdown (Google-Tasks style) ----
+  const STATUSES = [
+    { key: 'not_started', label: 'Not Started' },
+    { key: 'blocked',     label: 'Blocked'     },
+    { key: 'in_progress', label: 'In Progress' },
+    { key: 'completed',   label: 'Completed'   }
+  ];
+  function statusLabel(key) { const s = STATUSES.find(x => x.key === key); return s ? s.label : 'Not Started'; }
+  function closeStatusMenus(except) {
+    document.querySelectorAll('.status-menu.open').forEach(m => { if (m !== except) m.classList.remove('open'); });
+  }
+  function renderStatusControl(wrap) {
+    const key = wrap.dataset.status || 'not_started';
+    wrap.innerHTML = '';
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'status-pill st-' + key;
+    pill.innerHTML = '<span class="lbl">' + statusLabel(key) + '</span><span class="caret2">▾</span>';
+    const menu = document.createElement('div');
+    menu.className = 'status-menu';
+    STATUSES.forEach(s => {
+      const mi = document.createElement('div');
+      mi.className = 'mi' + (s.key === key ? ' sel' : '');
+      mi.innerHTML = '<span class="check">✓</span><span class="opt st-' + s.key + '">' + s.label + '</span>';
+      mi.addEventListener('click', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        wrap.dataset.status = s.key;
+        renderStatusControl(wrap);
+        persistRow(wrap.closest('.task-row'));
+        closeStatusMenus(null);
+      });
+      menu.appendChild(mi);
+    });
+    pill.addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      const willOpen = !menu.classList.contains('open');
+      closeStatusMenus(menu);
+      menu.classList.toggle('open', willOpen);
+    });
+    menu.addEventListener('click', function(e) { e.stopPropagation(); });
+    wrap.appendChild(pill);
+    wrap.appendChild(menu);
+  }
+  function renderStatusControls() {
+    document.querySelectorAll('.status-wrap').forEach(renderStatusControl);
+  }
+
   function init() {
-    restoreAll(); wire(); updateProgress();
+    restoreAll(); renderStatusControls(); wire(); updateProgress();
+    document.addEventListener('click', () => closeStatusMenus(null));
     // Initial chip render for any pre-checked subtasks (from tasks_v3.json done states)
     document.querySelectorAll('.task-row').forEach(row => {
       const dec = row.querySelector('.decision-form')?.dataset.decisionId;
@@ -586,6 +701,36 @@ ${otherBucket.map(renderTask).join('\n')}
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
+})();
+</script>
+
+<script>
+/* Tag filter: toggle task visibility by tag. Multi-select; "All" resets. */
+(function() {
+  const chips = Array.from(document.querySelectorAll('.tf-chip'));
+  if (!chips.length) return;
+  let active = new Set(['__all__']);
+  function apply() {
+    const all = active.has('__all__');
+    document.querySelectorAll('.task-row').forEach(r => {
+      const tags = (r.getAttribute('data-tags') || '').split(' ').filter(Boolean);
+      r.style.display = (all || tags.some(t => active.has(t))) ? '' : 'none';
+    });
+  }
+  chips.forEach(c => c.addEventListener('click', () => {
+    const t = c.dataset.tag;
+    if (t === '__all__') { active = new Set(['__all__']); }
+    else {
+      active.delete('__all__');
+      if (active.has(t)) active.delete(t); else active.add(t);
+      if (active.size === 0) active.add('__all__');
+    }
+    chips.forEach(x => {
+      const xt = x.dataset.tag;
+      x.classList.toggle('active', active.has('__all__') ? (xt === '__all__') : active.has(xt));
+    });
+    apply();
+  }));
 })();
 </script>
 </body>
