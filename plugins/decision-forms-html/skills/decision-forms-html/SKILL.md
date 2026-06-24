@@ -11,7 +11,7 @@ description: Use when building any HTML page that needs to collect answers from 
 
 - Click-to-uncheck radios (deselect by clicking the same option twice).
 - `localStorage` persistence so reopen-after-days restores draft answers.
-- Sticky toolbar at the bottom: **Copy all responses** (Markdown), **Download JSON**, **Clear all**.
+- Sticky toolbar at the bottom: optional **Submit to Claude** (one-click return, no copy-paste — see below), **Copy all responses** (Markdown), **Download JSON**, **Clear all**.
 - Per-question Clear button as a discoverable fallback.
 - Absorbed-content cleanup hook for when a re-render relocates user-supplied text out of a fieldset.
 
@@ -36,13 +36,34 @@ And the toolbar, once per page:
 
 ```html
 <div class="form-toolbar">
+  <button type="button" data-form-action="submit-to-claude">Submit to Claude</button>
   <button type="button" data-form-action="copy-all">Copy all responses</button>
   <button type="button" data-form-action="download-json">Download JSON</button>
   <button type="button" data-form-action="clear-all">Clear all</button>
 </div>
 ```
 
+The `submit-to-claude` button is optional — omit it if you're not running the bridge; Copy/Download still work.
+
 Then drop `references/form-pattern.js` at the end of `<body>` in a `<script>` tag (inline is fine; the file is ~190 lines).
+
+## One-click submit (optional — removes the copy-paste hop)
+
+The default loop ends with Jacob hitting **Copy** and pasting back to chat. To skip that, ship `references/bridge.js` next to the report and include the **Submit to Claude** button. On submit the page POSTs its answers to a tiny zero-dependency local server, which writes them to a file and exits — and because you launched it as a *background task*, that exit is your cue to read the file and act. No copy-paste, no "pick up my answers".
+
+Agent protocol:
+
+```bash
+node references/bridge.js --serve report.html --out answers.json --exit-on-submit &
+open "http://localhost:8765/"      # served by the bridge → Submit is same-origin
+# wait for the background task to exit, then read answers.json
+```
+
+`answers.json` shape: `{ kind: "decision-form", submitted_at, responses: { <decision-id>: { question, choice, choiceLabel, comment } } }`.
+
+- **Open the bridge URL, not the file.** Serving the page from `http://localhost:8765/` makes the POST same-origin (no CORS prompt). It still works as a bare `file://` via CORS to the default port, but localhost is cleaner.
+- **Safe to ship the button even without the server.** If no bridge is listening, Submit silently falls back to **Copy all** — nothing is lost.
+- **One decisive submit.** `--exit-on-submit` ends the server on the first submission (the decision-form model). Drop the flag to keep it alive for re-submits and poll `answers.json` yourself.
 
 ## Conventions
 
