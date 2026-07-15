@@ -38,7 +38,7 @@ Instead: ship the deliverable designed-freely, and **open a paired chat-substitu
 
 ## Output location
 
-Stable path so reopening hits the same file each time. Default: `<working-directory>/<topic>_chat-substitute.html`.
+Stable path so reopening hits the same file each time. Default: the owning project's `reports (claude)/<topic>_chat-substitute.html` (see `reports-catalog`: chat-substitutes keep stable un-prefixed names and get a row in that folder's CATALOG.md under Conversation surfaces). For Claude-infrastructure work with no owning project, the central `~/Claude/reports/<topic>/` convention applies instead.
 
 ## Bi-file pattern (default rhythm)
 
@@ -91,11 +91,15 @@ The TOC is what Jacob lands on. Treat it as a dashboard, not a list of links.
 
 **Cold-read test for the TOC:** Jacob walks away for two days, reopens, reads only the TOC. Can he tell, in under 10 seconds, (a) what needs his attention, (b) what's freshly resolved, (c) what's stable background? If not, fix the TOC before showing him.
 
-## Plain-language section titles and decision-card legends
+## Plain language everywhere Jacob reads — titles, legends, chips, tags, prose
 
 Jacob is a UChicago social-psych researcher, not a software engineer. Every section title encodes user-visible function ("How sign-in becomes simpler"), not tool-name ("auth-refactor"). Every section opens with a plain-English WHAT / WHY / SO-WHAT sentence before naming any tool or file. Decision-card legends (the `<legend>` text on each form) are plain-English questions Jacob would write himself coming back cold.
 
-Cold-read test: if Jacob walks away for two days and reopens, every section title and form legend should still parse without re-loading the session's internal vocabulary.
+The same rule covers every smaller piece of reader-facing text — chips, card tags, `<details>` summaries, callout labels. A label names what the content means to the reader, not the workflow step that produced it: "How each open question was resolved (July 15)", not "sign-off resolution (2026-07-15)"; "The reviewer comment this card responds to", not "full audit comment (margin note)".
+
+Summary prose ("what's new" callouts, card bodies) is short sentences, one idea per sentence. A change is spelled out — "H3 moves from primary to secondary because Tony registered it as a simple main effect" — not compressed into arrows or codenames ("H3 ↓ SECONDARY"). Supporting detail lives in a `<details>` block or a follow-on sentence, not in parentheticals stacked mid-sentence.
+
+Cold-read test: if Jacob walks away for two days and reopens, every title, label, chip, and opening paragraph should still parse without re-loading the session's internal vocabulary.
 
 ## Decision asks: progressive placement
 
@@ -124,7 +128,7 @@ Before opening the file and saying it's ready:
 2. **Long-form prose is not inside `<pre>`.** `<pre>` is for code or short ASCII fragments. Prose meant to be read goes in HTML (headings, paragraphs, lists, blockquotes) so it wraps and markdown markers don't render as literal `**` / `---` noise.
 3. No accidental strikethrough, all-bold, or other style bleeds.
 4. Any "What's new" expanded callout (when used) matches reality — every claimed change is actually present.
-5. All decision-card legends pass the cold-read test (no session-jargon).
+5. All reader-facing text — section titles, decision-card legends, chips, card tags, `<details>` summaries, and summary prose — passes the cold-read test (no session-jargon, no arrow/codename shorthand).
 6. All TOC anchors and any "What's new" anchors actually resolve.
 7. **Cold-read scan for status legibility.** Reading only the TOC, can Jacob locate, in <10 seconds, (a) what's still open, (b) what just locked this turn, (c) what was locked previously? If those three are mixed up or any is buried, demote locked content and refresh TOC labels before showing him. **Failure shape: growth-without-demotion** — each render adds new content but doesn't shed locked weight, until the open surface drowns in resolved status. If the live file is approaching ~600+ lines or >50% of decision cards are locked, the bi-file pattern has been under-used; archive aggressively before rendering again.
 
