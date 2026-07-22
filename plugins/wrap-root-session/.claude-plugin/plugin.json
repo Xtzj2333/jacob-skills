@@ -1,0 +1,7 @@
+{
+  "name": "wrap-root-session",
+  "description": "Use when a Claude Code session run from ~/Claude (the workspace root) is ending and its artifacts sit loose — new files at root, in Unordered/, or scattered across folders — and Jacob wants the session's work tidied into one self-contained folder. Triggers: \"organize this session's files into a folder\", \"wrap up this session\", \"I'm going to close this session\", \"/wrap-root-session\". Also fires proactively at session close when this session created root-level or Unordered/ files on a topic with no owning folder.",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}
