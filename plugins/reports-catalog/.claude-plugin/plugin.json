@@ -1,0 +1,7 @@
+{
+  "name": "reports-catalog",
+  "description": "Use BEFORE choosing an output path for any rendered deliverable for Jacob (HTML report or chat-substitute, docx/pdf brief, rendered slides or images). Routes the file into the owning project's `reports (claude)/` folder, assigns the stage.version index by reading CATALOG.md, and appends the catalog row in the same turn. Also use when Jacob says \"bump the stage/version\", asks where a report should go, or wants an existing folder retrofitted. Not for manuscript files (`_PROPOSED` convention), data/code outputs, or the central `~/Claude/reports/` (Claude-infrastructure reports; keeps its own date-first convention).",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}
