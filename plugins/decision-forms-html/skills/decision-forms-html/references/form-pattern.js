@@ -29,6 +29,11 @@
 //     <button type="button" data-form-action="download-json">Download JSON</button>
 //     <button type="button" data-form-action="clear-all">Clear all</button>
 //   </div>
+//
+// Archive chip (chat-substitute pages; see chat-substitute-html skill):
+//   <button type="button" class="archive-chip" data-archive-target="section-id">Archive this?</button>
+//   One click toggles "marked to archive"; marks persist in the same storage entry,
+//   ride the copy-all paste as an "## Archive marks" block, and the next render executes them.
 
 (function() {
   const STORAGE_KEY = 'html_form_responses_v1';  // namespace per report if needed
@@ -87,7 +92,27 @@
       }
     });
   }
-  function persist() { save(readForm()); }
+  // --- Archive chips: mark sections "archive this" (chat-substitute-html) ---
+  function setChip(btn, marked) {
+    btn.classList.toggle('marked', marked);
+    btn.textContent = marked ? '✓ marked to archive' : (btn.dataset.label || 'Archive this?');
+  }
+  function getMarks() {
+    return Array.from(document.querySelectorAll('.archive-chip.marked'))
+      .map(b => b.dataset.archiveTarget);
+  }
+  function restoreMarks() {
+    (load()._archiveMarks || []).forEach(id => {
+      const b = document.querySelector(`.archive-chip[data-archive-target="${id}"]`);
+      if (b) setChip(b, true);
+    });
+  }
+
+  function persist() {
+    const state = readForm();
+    state._archiveMarks = getMarks();
+    save(state);
+  }
 
   function showToast(msg, color) {
     document.querySelectorAll('.form-toast').forEach(t => t.remove());
@@ -113,13 +138,19 @@
       if (v.comment) md += `- **Comment:** ${v.comment}\n`;
       md += '\n';
     });
+    const marks = getMarks();
+    if (marks.length) {
+      md += `## Archive marks\n${marks.map(m => '- #' + m).join('\n')}\n\n`;
+      answered += marks.length;
+    }
     if (answered === 0) { showToast('No answers to copy yet', '#a60'); return; }
     navigator.clipboard.writeText(md)
       .then(() => showToast(`Copied ${answered} response${answered === 1 ? '' : 's'}`))
       .catch(err => showToast('Copy failed: ' + err.message, '#b33'));
   }
   function downloadJSON() {
-    const payload = { generated_at: new Date().toISOString(), responses: readForm() };
+    const payload = { generated_at: new Date().toISOString(), responses: readForm(),
+                      archive_marks: getMarks() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -133,6 +164,7 @@
     if (!confirm('Clear all responses on this page?')) return;
     document.querySelectorAll('.decision-form input[type="radio"]').forEach(r => { r.checked = false; r._lastChecked = false; });
     document.querySelectorAll('.decision-form textarea').forEach(t => t.value = '');
+    document.querySelectorAll('.archive-chip.marked').forEach(b => setChip(b, false));
     save({});
     showToast('Cleared all responses');
   }
@@ -176,9 +208,17 @@
     document.querySelectorAll('.clear-q').forEach(btn => {
       btn.addEventListener('click', () => clearQuestion(btn.dataset.clears));
     });
+    // Archive chips
+    document.querySelectorAll('.archive-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setChip(btn, !btn.classList.contains('marked'));
+        persist();
+      });
+    });
   }
   function init() {
     restoreForm();
+    restoreMarks();
     wire();
     document.querySelectorAll('.decision-form input[type="radio"]:checked')
       .forEach(r => r._lastChecked = true);

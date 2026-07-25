@@ -5,23 +5,13 @@ description: Use when building any HTML page that needs to collect answers from 
 
 # decision-forms-html
 
-> Interactive decision-form pattern for HTML pages. Self-contained: lift `references/form-pattern.js` verbatim into a `<script>` at the end of `<body>`, mark fieldsets with the conventional class, and Jacob's answers persist across sittings until he hits Copy.
+The standardized mechanics for collecting Jacob's answers in an HTML page: lift `references/form-pattern.js` verbatim into a `<script>` at the end of `<body>` and use the markup contracts below. Answers, comments, and archive marks persist in localStorage across sittings until Jacob hits **Copy all** — one paste captures everything. Only these contracts are fixed (so recording works reliably); the page design around them is free.
 
-## What you get
-
-- Click-to-uncheck radios (deselect by clicking the same option twice).
-- `localStorage` persistence so reopen-after-days restores draft answers.
-- Sticky toolbar at the bottom: **Copy all responses** (Markdown), **Download JSON**, **Clear all**.
-- Per-question Clear button as a discoverable fallback.
-- Absorbed-content cleanup hook for when a re-render relocates user-supplied text out of a fieldset.
-
-The one-paste-captures-all design is load-bearing: Jacob fills out across however many sittings he wants, then submits everything in one paste-back to chat.
-
-## Markup pattern
+## Decision fieldset
 
 ```html
 <fieldset class="decision-form" data-decision-id="some-decision">
-  <legend>Plain-English question Jacob would naturally ask?</legend>
+  <legend>Plain-English question?</legend>
   <p class="question-prompt">Brief context + Claude's recommendation.</p>
   <div class="options">
     <label><input type="radio" name="some-decision" value="a"> A — option label</label>
@@ -32,7 +22,7 @@ The one-paste-captures-all design is load-bearing: Jacob fills out across howeve
 </fieldset>
 ```
 
-And the toolbar, once per page:
+And the toolbar, once per page (radios are click-to-uncheck; the per-question Clear is the discoverable fallback):
 
 ```html
 <div class="form-toolbar">
@@ -42,15 +32,17 @@ And the toolbar, once per page:
 </div>
 ```
 
-Then drop `references/form-pattern.js` at the end of `<body>` in a `<script>` tag (inline is fine; the file is ~190 lines).
+## Archive chip (chat-substitute pages)
 
-## Conventions
+```html
+<button type="button" class="archive-chip" data-archive-target="section-id">Archive this?</button>
+```
 
-- **Decision-id is semantic.** `migration-strategy`, `naming-convention` — names Jacob will scan in the copied Markdown.
-- **Legend is a plain-English question Jacob would write himself coming back cold.** "Act on the fired trigger" fails this; "Should I update the sync tool so it can also make HTML?" passes.
-- **STORAGE_KEY namespaces by report.** Edit the top of the JS to `html_form_responses_<page-slug>` so multiple form-bearing HTMLs don't collide in localStorage. Symptom of skipping this: answers appear in unrelated pages.
+Click toggles "✓ marked to archive"; marks persist in the same storage entry, ride Copy-all as a final `## Archive marks` block (and the JSON download), and the next render moves marked sections to the archive and clears the marks. Style it obviously clickable — it must not read as a static tag. Pair every chip with a detail fold: a `<details>` beside it (obviously-clickable summary, e.g. "More detail") holding enough context — where the item came from, when, what archiving it means — for Jacob to judge it cold; a chip he can't place is a chip he can't click. When to use the chip lives in `chat-substitute-html`.
 
-## What this skill does NOT carry
+## Correctness rules
 
-- No opinions about page structure, "what's new" pins, status banners, or locked-decision demotion — those are `chat-substitute-html`'s job. This skill is just the form mechanics.
-- Don't swap to Alpine.js — `$persist` has a load-order trap where `x-model` silently fails if `alpine-persist.js` hasn't loaded yet. The reference JS is intentionally framework-free.
+1. **STORAGE_KEY namespaces by page.** Edit the top of the JS to `html_form_responses_<page-slug>` — otherwise answers bleed between reports.
+2. **Ids and legends are what Jacob pastes back.** `data-decision-id` and `<legend>` become the headings of the copied Markdown, so make them recognizable out of context (semantic id, plain-English question).
+3. **Applied comments must auto-clear.** Jacob's typed comments live in browser localStorage, not the HTML — applying a round doesn't clear the boxes, and his next Copy-all re-sends them. Any page with free-text comment boxes embeds a `PROCESSED` registry (`{comment-key: {text, round}}`, appended verbatim each round); on open, a box whose saved text matches its registry entry (whitespace/smart-quote/case-normalized) auto-clears into `STORAGE_KEY + '_cleared'` with an undo note. An edited box never auto-clears — that's the safety valve for added follow-up thoughts. Reference implementations: FE3's `prereg/process_build_comment_copy.py` and the inline version in `prereg/FE3_variable_hypothesis_map.html`.
+4. **Don't swap to Alpine.js** — `$persist` has a load-order trap where `x-model` silently fails to bind. The reference JS is intentionally framework-free.
