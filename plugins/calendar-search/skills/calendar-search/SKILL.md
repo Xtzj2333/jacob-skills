@@ -1,192 +1,109 @@
 ---
 name: calendar-search
-description: "General-purpose Google Calendar lookup for Jacob — answering 'is X on my calendar', 'do I have a Y', 'when is my Z', or 'find the event about W'. Use this whenever Jacob asks about ANY event on his calendar that isn't an active to-do task — flights, appointments, meetings, talks, classes, social plans, doctor visits, family events, recurring habits, plant-care reminders, or anything where Jacob expects 'it should be on my calendar somewhere'. The to-do skill (jacob-todos) excludes several calendars by design; this skill exists because those excluded calendars (Meeting, Classes, Office Hours, Tasks, etc.) are exactly where appointments, recurring habits, and fixed events live. Trigger on phrases like 'is X on my calendar', 'do I have', 'when is my', 'find my', 'search my calendar', 'check my cal', 'what time is', or any question about a specific event Jacob believes exists. Don't trigger for general to-do operations — that's jacob-todos."
+description: "Search Jacob's Google Calendar for any event that isn't an active to-do — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', or names any event he believes exists somewhere. His events span ~13 calendars and are often titled in Chinese, so the naive one-calendar keyword search silently misses them — use this recipe instead. Not for to-do operations: that's jacob-todos."
 ---
 
 # Calendar Search
 
-Jacob's calendar holds events across roughly a dozen calendars in Google. The naive search — "default calendar + fullText filter" — misses most of what he asks about because (1) most events don't live on the default calendar and (2) the API's `fullText` filter doesn't reliably match Chinese or other non-Latin titles. This skill is the recipe for doing it right.
+Jacob's calendar is bCal — his Berkeley Google account — spread across ~13 calendars. The ten named `UChicago — <name>` are static imports made before his UChicago account closed on 2026-07-26 — they are his and writable; the prefix is a label, not a location. Anything created since lands on the primary.
 
-## The one rule that matters most
+Two things make the obvious search fail, and this skill exists because of them: most events aren't on the primary calendar, and the API's `fullText` filter doesn't reliably match Chinese titles. Get those two right and the rest is bookkeeping.
 
-**Do not use the `fullText` parameter to filter `list_events` calls.** It silently misses CJK titles and only searches the calendar you specify, so you have to iterate calendars anyway. Filter in code instead, on the actual `summary` / `description` / `location` fields.
+## The two rules
 
-The second-most-important rule: **always query `list_calendars` first and iterate every result by `calendarId`.** Never trust the default primary calendar — most things Jacob asks about live elsewhere (Meeting holds his appointments; Tasks holds recurring habits like watering his cactus; Classes holds course meetings).
+**Never pass `fullText` to `list_events`.** It silently misses CJK titles, and it only searches the one calendar you name — so you have to iterate calendars regardless. Pull the window and match in code against `summary` / `description` / `location`. If you catch yourself reaching for `fullText`, you're about to miss the answer.
 
-## The standard search recipe
+**Always start from `list_calendars` and iterate every result.** Appointments are on `UChicago — Meeting`, recurring habits on `UChicago — Tasks`, courses on `UChicago — Classes`. Reporting "not found" after searching only the primary is the single most common way this lookup fails him.
+
+## The recipe
 
 ```python
-# 1. Get every calendar Jacob has
-calendars = list_calendars()  # ~13 calendars
+calendars = list_calendars()
+keywords  = expand(question)          # bilingual — see below
+matches   = []
 
-# 2. Expand the query into likely keyword variants BEFORE scanning
-#    English ↔ Chinese synonyms, partial substrings, related terms
-keywords = expand_keywords(jacob_question)  # see "Keyword expansion" below
-
-# 3. For each calendar, fetch events in the date window WITHOUT fullText
-matches = []
 for cal in calendars:
-    try:
-        events = list_events(
-            calendarId=cal["id"],
-            startTime=window_start,
-            endTime=window_end,
-            orderBy="startTime",
-        )  # NO fullText param — pull everything in the window
-    except ResultTooLargeError:
-        # Some calendars (notably "Tasks") have hundreds of recurring entries
-        # like "check in workday" / "mindfulness" — split the window and retry
-        events = fetch_in_chunks(cal["id"], window_start, window_end, chunk_days=14)
+    if cal["summary"] in NOISY:       # marked "chunk" in the table below
+        events = walk_in_chunks(cal["id"], start, end, days=14)
+    else:
+        try:
+            events = list_events(calendarId=cal["id"], startTime=start,
+                                 endTime=end, orderBy="startTime")["events"]
+        except ResultTooLargeError:
+            events = walk_in_chunks(cal["id"], start, end, days=14)
 
-    # 4. Substring-match in CODE on summary, description, location
-    for ev in events.get("events", []):
-        blob = " ".join([
-            ev.get("summary", "") or "",
-            ev.get("description", "") or "",
-            ev.get("location", "") or "",
-        ]).lower()
+    for ev in events:                 # match in CODE, never via fullText
+        blob = " ".join(filter(None, [ev.get("summary"), ev.get("description"),
+                                      ev.get("location")])).lower()
         if any(k.lower() in blob for k in keywords):
             matches.append((cal["summary"], ev))
 ```
 
-This pattern catches Chinese, mixed scripts, partial matches, and synonyms in one pass. It is non-negotiable. If you find yourself reaching for `fullText`, stop — you're about to silently miss the answer.
+**Completion criterion:** every calendar's full window has actually been scanned. A calendar that threw "result too large" and wasn't retried in chunks means the search isn't finished — that's exactly how "when am I next watering the cactus?" comes back empty when the answer was sitting in `UChicago — Tasks`.
 
 ## Keyword expansion
 
-Jacob's calendar is bilingual: many events have Chinese titles (e.g., `给仙人掌浇水`), some have English titles, some mix both. Whatever language Jacob asks in, **build a keyword list with both English and Chinese forms** before scanning.
+The calendar is bilingual — some titles Chinese (`给仙人掌浇水`), some English, some mixed. Whatever language he asks in, search both. Over-including costs one discarded match; under-including costs the answer.
 
-| Jacob asks about | Expand to keywords |
+| He asks about | Also search |
 |---|---|
-| cactus / plant watering | `cactus`, `plant`, `water`, `仙人掌`, `浇水`, `植物` |
-| visa appointment | `visa`, `consular`, `appointment`, `embassy`, `consulate`, `签证`, `领事`, `面签` |
-| flight | `flight`, `depart`, `arrival`, `airport`, `航班`, `飞机`, `机票` |
-| family call | `call`, `mom`, `dad`, `grandma`, `family`, `打电话`, `通话`, `妈`, `爸` |
-| doctor / dentist | `doctor`, `dentist`, `medical`, `医生`, `牙医`, `看病` |
-| lab meeting | `lab meeting`, `lab`, lab leader's name, `实验室` |
+| cactus / plant watering | `仙人掌`, `浇水`, `植物`, `water`, `plant` |
+| visa appointment | `签证`, `领事`, `面签`, `consular`, `embassy`, `consulate` |
+| flight | `航班`, `飞机`, `机票`, `depart`, `arrival`, `airport` |
+| family call | `打电话`, `通话`, `妈`, `爸`, `mom`, `dad`, `grandma` |
+| doctor / dentist | `医生`, `牙医`, `看病`, `medical`, `appointment` |
+| lab meeting | `实验室`, `lab`, the lab leader's name |
 
-When unsure, over-include keywords. The cost of an extra match-and-discard is tiny; the cost of missing the event is high (Jacob loses trust in the lookup).
+## The calendars
 
-## Calendars with heavy recurring noise — chunk by default
+Re-fetch with `list_calendars` every time — IDs can rotate. Canonical IDs live in `~/Claude/to do/gcal_todo_instructions.md` and are deliberately not duplicated here, so there's only one copy to keep true.
 
-The `Tasks` calendar has hundreds of recurring entries (`check in workday`, `mindfulness`, repeated daily) that almost always exceed the `list_events` token limit when you request a 90-day window in one call. The same is sometimes true of `Optional`, `Really Important Tasks`, and `Meeting`.
+| Calendar | Holds | |
+|---|---|---|
+| the primary (his bCal account) | everything created after July 2026 | |
+| `UChicago — Events` | old primary: personal to-dos, reminders, fixed events | |
+| `UChicago — Really Important Tasks` | high-priority one-offs; deadlines, payments, renewals | chunk |
+| `UChicago — Optional` | recurring family calls, low-priority items | chunk |
+| `UChicago — Tasks` | daily structure and recurring habits (`给仙人掌浇水`, mindfulness) | chunk |
+| `UChicago — Meeting` | lab meetings, talks, **appointments — visa, doctor, dentist** | chunk · excluded |
+| `UChicago — Classes` | course meetings | excluded |
+| `UChicago — Office Hours` | TA hours | excluded |
+| `UChicago — Potentials Lab`, `— SONA Schedule`, `— FE 3` | research schedules | |
+| `Holidays in United States` | auto | |
 
-**Don't bet on the error-recovery path. Default to chunked windows for these four calendars from the start.** Skipping `Tasks` because of a too-large error is exactly how Jacob loses an answer like "when am I watering my cactus next?" — that recurring habit lives there.
+**chunk** — hundreds of recurring entries; walk these in 14-day slices from the start rather than betting on the error-recovery path.
 
-The chunking loop:
+**excluded** — `jacob-todos` skips these during to-do consolidation. That exclusion is the reason this skill exists: those four calendars are where most lookup questions actually land. Scan them.
 
-```python
-NOISY_CALENDARS = {"Tasks", "Optional", "Really Important Tasks", "Meeting"}
+The `UChicago — *` calendars are frozen copies (~9,120 events, colours preserved): recurring series still project forward, but no live invites arrive and nothing new is added. The shared `RAs Schedule` didn't survive the migration — it wasn't Jacob's to export. Raw `.ics` backups: `~/Claude/UChicago account backup/uchicago-calendar-backup (claude)/`.
 
-def fetch_events(cal, window_start, window_end):
-    if cal["summary"] in NOISY_CALENDARS:
-        # Walk forward in 14-day slices
-        cursor = window_start
-        all_events = []
-        while cursor < window_end:
-            chunk_end = min(cursor + timedelta(days=14), window_end)
-            events = list_events(calendarId=cal["id"], startTime=cursor, endTime=chunk_end, orderBy="startTime")
-            all_events.extend(events.get("events", []))
-            cursor = chunk_end
-        return all_events
-    else:
-        # Try one shot; if it fails, fall back to chunking
-        try:
-            return list_events(calendarId=cal["id"], startTime=window_start, endTime=window_end, orderBy="startTime").get("events", [])
-        except ResultTooLargeError:
-            return fetch_events_chunked(cal, window_start, window_end, days=14)
-```
+## Date window
 
-**Completion criterion: the search is not done until every calendar's full date window has been actually scanned in code.** If a calendar returned a too-large error and you didn't retry with chunks, you have not finished — go back and chunk it before reporting "not found."
-
-## Picking the date window
-
-| Jacob says... | Use window |
+| He says | Window |
 |---|---|
-| "in June" / "next month" / "this week" | That bounded period |
-| Specific date ("the 9th", "Monday") | The date ±2 days (in case he mis-recalled) |
-| No date hint | Next 90 days from today; if nothing turns up, expand backward 30 days |
+| "in June", "next month", "this week" | that period |
+| a specific date | that date ±2 days, in case he misremembered |
+| nothing | next 90 days; if empty, extend 30 days back |
 
-When the event might be recurring (cactus watering, family calls, lab meetings), the date window only needs to capture the next instance — don't expand to a year.
+For anything recurring, the window only needs to reach the next instance — don't sweep a year.
 
-## Hint: keyword-to-calendar associations
+## Timestamps — the one that's easy to get backwards
 
-These are *hints*, not shortcuts. Always scan every calendar — but if you have to triage which one to look at first when results are partial, this is roughly where things live:
+The API returns `dateTime` in *your* calendar's offset, not the event's. `timeZone` is what the human cares about.
 
-| Keyword cluster | Most likely calendar |
-|---|---|
-| "appointment", "consular", "embassy", "doctor", "dentist" | Meeting |
-| Recurring habit (watering, mindfulness, family call) | Tasks, Optional |
-| Lab meeting, talk, seminar, lecture Jacob attends | Meeting, Classes |
-| Office hours / TA work | Office Hours |
-| Flight, departure, arrival, trip | Events, Really Important Tasks |
-| Deadline, payment, renewal, submit | Really Important Tasks, Tasks |
-
-Never report "not found" without having scanned **every** calendar from `list_calendars` — including the bold/excluded ones in the to-do skill.
-
-## When you don't find an exact match
-
-Don't conclude the event doesn't exist. Two things to do:
-
-1. **Broaden the keyword set.** If Jacob asked in English ("cactus"), did you actually search for the Chinese variant (`仙人掌`)? If he asked in Chinese, did you search for the English form? Run the scan again with the broader list.
-2. **Surface near-misses.** Show the closest 2–3 candidate events you found, with their dates and calendars. The to-do skill has a documented pattern: docx and calendar titles diverge, so what Jacob remembers an event being called isn't always its actual title. Let him pick.
-
-Only after both of those should you report "I couldn't find this on any calendar, in either language. Want me to check Gmail, your Notes, or a phone reminder?"
-
-## Reading Google Calendar timestamps correctly
-
-Google's API returns `dateTime` in the requestor's calendar offset by default, **not** in the event's source timezone. The `timeZone` field is the source-of-truth for what the human cares about.
-
-For example, an event stored in `Asia/Tokyo` may come back from the API as:
 ```
 "start": {
-  "dateTime": "2027-03-15T21:15:00-05:00",   # Chicago offset
-  "timeZone": "Asia/Tokyo"                   # actual zone the event is set in
+  "dateTime": "2027-03-15T21:15:00-05:00",   ← requestor-side offset
+  "timeZone": "Asia/Tokyo"                   ← the zone the event lives in
 }
 ```
 
-The naive read — "21:15 in Asia/Tokyo → 9:15 PM Tokyo" — is wrong. The correct read:
-- The `-05:00` offset means UTC moment is `2027-03-16T02:15:00Z`
-- In `Asia/Tokyo` (UTC+9), that's **2027-03-16 11:15 AM Tokyo time**
-- So when reporting, show **March 16, 11:15 AM Tokyo time**, not "March 15 21:15 Tokyo"
+Reading that as "9:15 PM Tokyo" is wrong. The `-05:00` puts the moment at `2027-03-16T02:15Z`, which in Tokyo (UTC+9) is **March 16, 11:15 AM**. Easiest fix: pass `timeZone="Asia/Tokyo"` to `list_events` and let the API convert.
 
-When in doubt, pass `timeZone="Asia/Tokyo"` (or whatever zone is in the event) to `list_events` so the API returns the dateTime in that zone directly.
+An event stored in a non-local zone is stored that way on purpose — it's the real time at the venue, and converting it away strips that signal. Report the source zone first and add his current device-local time as a parenthetical if it helps. Never substitute a hardcoded city; he relocates.
 
 ## Reporting back
 
-When you find the event, give Jacob:
-- **Which calendar** it's on (so he learns where to look next time)
-- **The date and time in the event's source timezone** (the `timeZone` field — see above for how to convert correctly). For events in non-local zones, optionally also show Chicago time as a parenthetical, but never replace the source-zone time silently. If an event is stored in a non-local zone, that's intentional — it's the actual time at the venue; converting it away strips that signal.
-- **Location, description, recurrence** if any of those is relevant
+**Found it** — say *which calendar* (so he learns where to look next time), the time in the event's own zone, and location / recurrence where relevant.
 
-When you can't find it, tell Jacob:
-- The full list of calendars you searched (name them)
-- The date window you used
-- The keyword variants you tried (especially the CJK ones)
-- Any near-miss candidates
-
-## Calendar reference
-
-Always re-fetch via `list_calendars` — IDs can rotate. As of last review, Jacob has roughly:
-
-| Calendar | Holds |
-|---|---|
-| Events | Primary calendar — personal to-dos, reminders, occasional fixed events |
-| Really Important Tasks | High-priority one-offs |
-| Optional | Recurring family calls, low-priority items |
-| Tasks | Daily structure (workday check-in, mindfulness), recurring habits like 给仙人掌浇水 |
-| **Meeting** | Lab meetings, talks, **appointments (visa, doctor, etc.)** |
-| **Classes** | Course meetings |
-| **Office Hours** | TA hours |
-| **Potentials Lab**, **SONA Schedule**, **FE 3**, **RAs Schedule** | Research-related schedules |
-| Holidays | UK holidays (auto) |
-
-Bold = the to-do skill (`jacob-todos`) excludes these from to-do consolidation, but they hold real events Jacob will ask about. **Scan them anyway.**
-
-## Anti-patterns (the failure modes)
-
-- ❌ Calling `list_events` without a `calendarId` and reporting "not found" — that only searches the default Events calendar.
-- ❌ Calling `list_events(calendarId=..., fullText="仙人掌")` and trusting the empty result — `fullText` does not reliably match CJK substrings, even when the event title contains the exact characters.
-- ❌ Searching only in the language Jacob asked the question in, when his calendar is bilingual.
-- ❌ Skipping a calendar because `list_events` returned a "result too large" error — split the window into 14-day chunks and retry. The recurring habits and noise events live there. **For Tasks/Optional/Really Important Tasks/Meeting, default to chunked windows from the start; don't bet on the recovery path.**
-- ❌ Reporting "not found" before scanning Meeting, Classes, Office Hours, and Tasks — the four calendars the to-do skill excludes are exactly where most lookup queries land.
-- ❌ Silently converting the event's stored timezone — if it's stored in `Asia/Tokyo` (or any non-local zone), that's intentional; preserve it in your report.
+**Can't find it** — don't stop at "no". First: did you actually search the other language? Then show the closest 2–3 near-misses with their dates and calendars, because what Jacob remembers an event being called often isn't its stored title. Only after both should you say it isn't there — and then name what you searched: the calendars, the window, the keyword variants you tried. Offer Gmail, Notes, or a phone reminder as the next place to look.
