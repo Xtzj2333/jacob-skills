@@ -1,11 +1,11 @@
 ---
 name: calendar-search
-description: "Search Jacob's Google Calendar for any event that isn't an active to-do — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', or names any event he believes exists somewhere. His events span ~13 calendars and are often titled in Chinese, so the naive one-calendar keyword search silently misses them — use this recipe instead. Not for to-do operations: that's jacob-todos."
+description: "Search Jacob's Google Calendar for any event that isn't an active to-do — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', or names any event he believes exists somewhere. His events span ~13 calendars (renamed 2026-07-31 — no more 'UChicago' prefix) and are often titled in Chinese, so the naive one-calendar keyword search silently misses them — use this recipe instead. Not for to-do operations: that's jacob-todos."
 ---
 
 # Calendar Search
 
-Jacob's calendar is bCal — his Berkeley Google account — spread across ~13 calendars. The ten named `UChicago — <name>` are static imports made before his UChicago account closed on 2026-07-26 — they are his and writable; the prefix is a label, not a location. Anything created since lands on the primary.
+Jacob's calendar is bCal — his Berkeley Google account — spread across ~13 calendars. Ten of them are static imports made before his UChicago account closed on 2026-07-26 — they are his and writable. They carried a `UChicago — ` prefix until 2026-07-31, when it was dropped; only the two genuinely finished ones still say so, as `SONA Schedule (UChicago, archived)` and `Potentials Lab (UChicago, archived)`. Renaming did not change their IDs. Anything created since lands on the primary.
 
 Two things make the obvious search fail, and this skill exists because of them: most events aren't on the primary calendar, and the API's `fullText` filter doesn't reliably match Chinese titles. Get those two right and the rest is bookkeeping.
 
@@ -13,7 +13,7 @@ Two things make the obvious search fail, and this skill exists because of them: 
 
 **Never pass `fullText` to `list_events`.** It silently misses CJK titles, and it only searches the one calendar you name — so you have to iterate calendars regardless. Pull the window and match in code against `summary` / `description` / `location`. If you catch yourself reaching for `fullText`, you're about to miss the answer.
 
-**Always start from `list_calendars` and iterate every result.** Appointments are on `UChicago — Meeting`, recurring habits on `UChicago — Tasks`, courses on `UChicago — Classes`. Reporting "not found" after searching only the primary is the single most common way this lookup fails him.
+**Always start from `list_calendars` and iterate every result.** Appointments are on `Meeting`, recurring habits on `Tasks`, courses on `Classes`. Reporting "not found" after searching only the primary is the single most common way this lookup fails him.
 
 ## The recipe
 
@@ -39,7 +39,7 @@ for cal in calendars:
             matches.append((cal["summary"], ev))
 ```
 
-**Completion criterion:** every calendar's full window has actually been scanned. A calendar that threw "result too large" and wasn't retried in chunks means the search isn't finished — that's exactly how "when am I next watering the cactus?" comes back empty when the answer was sitting in `UChicago — Tasks`.
+**Completion criterion:** every calendar's full window has actually been scanned. A calendar that threw "result too large" and wasn't retried in chunks means the search isn't finished — that's exactly how "when am I next watering the cactus?" comes back empty when the answer was sitting in `Tasks`.
 
 ## Keyword expansion
 
@@ -61,21 +61,22 @@ Re-fetch with `list_calendars` every time — IDs can rotate. Canonical IDs live
 | Calendar | Holds | |
 |---|---|---|
 | the primary (his bCal account) | everything created after July 2026 | |
-| `UChicago — Events` | old primary: personal to-dos, reminders, fixed events | |
-| `UChicago — Really Important Tasks` | high-priority one-offs; deadlines, payments, renewals | chunk |
-| `UChicago — Optional` | recurring family calls, low-priority items | chunk |
-| `UChicago — Tasks` | daily structure and recurring habits (`给仙人掌浇水`, mindfulness) | chunk |
-| `UChicago — Meeting` | lab meetings, talks, **appointments — visa, doctor, dentist** | chunk · excluded |
-| `UChicago — Classes` | course meetings | excluded |
-| `UChicago — Office Hours` | TA hours | excluded |
-| `UChicago — Potentials Lab`, `— SONA Schedule`, `— FE 3` | research schedules | |
+| `Events` | old primary: personal to-dos, reminders, fixed events | |
+| `Really Important Tasks` | high-priority one-offs; deadlines, payments, renewals | chunk |
+| `Optional` | recurring family calls, low-priority items | chunk |
+| `Tasks` | daily structure and recurring habits (`给仙人掌浇水`, mindfulness) | chunk |
+| `Meeting` | lab meetings, talks, **appointments — visa, doctor, dentist** | chunk · excluded |
+| `Classes` | course meetings | excluded |
+| `Office Hours` | TA hours | excluded |
+| `FE 3` | research schedules — live work, will refill | |
+| `SONA Schedule (UChicago, archived)`, `Potentials Lab (UChicago, archived)` | finished UChicago infrastructure; empty | |
 | `Holidays in United States` | auto | |
 
 **chunk** — hundreds of recurring entries; walk these in 14-day slices from the start rather than betting on the error-recovery path.
 
 **excluded** — `jacob-todos` skips these during to-do consolidation. That exclusion is the reason this skill exists: those four calendars are where most lookup questions actually land. Scan them.
 
-The `UChicago — *` calendars are frozen copies (~9,120 events, colours preserved): recurring series still project forward, but no live invites arrive and nothing new is added. The shared `RAs Schedule` didn't survive the migration — it wasn't Jacob's to export. Raw `.ics` backups: `~/Claude/UChicago account backup/uchicago-calendar-backup (claude)/`.
+The ten imported calendars are frozen copies (~9,120 events, colours preserved): recurring series still project forward, but no live invites arrive and nothing new is added. The shared `RAs Schedule` didn't survive the migration — it wasn't Jacob's to export. Raw `.ics` backups: `~/Claude/UChicago account backup/uchicago-calendar-backup (claude)/`.
 
 ## Date window
 
