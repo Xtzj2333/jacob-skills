@@ -10,7 +10,7 @@ description: Use when the user asks to find or download the PDF of a specific na
 Layered fallback for acquiring a specific known paper as a PDF. Two operating modes — **synchronous** (user is at their computer and can click once) vs. **asynchronous** (Claude is fetching while user is away). The right tier depends on which mode you're in.
 
 Core insights:
-- **Zotero + institutional library is the dominant solution.** The community has converged on Zotero's translator + EZproxy auto-detection ecosystem. For UChicago, `Wiley Online Library + UChicago Library` co-branded pages route through institutional access in one click and bypass Cloudflare bot-detection that defeats anonymous `curl`.
+- **Zotero + institutional library is the dominant solution — but it is DORMANT right now.** The UChicago account closed 2026-07-26, killing the library proxy / Find It! / SFX route; Berkeley library access doesn't exist until enrollment (~Fall 2026), at which point Berkeley's proxy becomes the new Tier 0 (see `~/Claude/UChicago account backup/WHERE-THINGS-ARE.md`). The mechanics below are kept because they transfer directly to the Berkeley endpoints. Until then, both SYNC and ASYNC mode start at Tier 1.
 - **OA-API "closed" verdicts are conservative.** Author-archived PDFs on Squarespace/personal sites, Springer SharedIt links, PsyArXiv preprints, and direct `filetype:pdf` Google hits routinely surface papers Unpaywall reports as having no OA copy.
 - **"Open Access" doesn't mean "anonymously fetchable."** Wiley OA papers (e.g. CC-BY-NC) are gated behind Cloudflare even when the license is open. A real browser session — institutional or not — passes the challenge; `curl` does not.
 
@@ -27,25 +27,24 @@ Core insights:
 
 ## Operating modes
 
-**SYNC (user present):** Use Tier 0 (Zotero + institutional library) first. One click; ~90% success rate; bypasses bot-detection. Fallback to Tier 1+ only when the paper isn't in the institution's licensed catalog.
+**SYNC (user present):** Normally Tier 0 (Zotero + institutional library) first — one click; ~90% success rate; bypasses bot-detection. **While Tier 0 is dormant (no institutional access between UChicago closure and Berkeley enrollment), start at Tier 1 even in SYNC mode.**
 
-**ASYNC (user absent):** Skip Tier 0 — it requires user click. Start at Tier 1 (paper-search MCP), proceed through Tiers 2-6. If all fail, surface a user-action recommendation pointing the user at the Tier 0 URL for when they next sit down.
+**ASYNC (user absent):** Skip Tier 0 — it requires user click. Start at Tier 1 (paper-search MCP), proceed through Tiers 2-6. If all fail, surface a user-action recommendation (Tier 7).
 
 ## Decision tree
 
 A "valid PDF" means: HTTP 200, `file <path>` reports `PDF document`, magic bytes start with `%PDF-`, size ≥50 KB, title/author grep matches.
 
-### Tier 0 — Zotero + institutional library (SYNC mode only)
+### Tier 0 — Zotero + institutional library (SYNC mode only — **DORMANT until Berkeley enrollment, ~Fall 2026**)
 
-For UChicago, the canonical SFX endpoint is:
+The UChicago endpoints below died with the account closure (2026-07-26): `sfx.lib.uchicago.edu`, `www.lib.uchicago.edu` search, and `proxy.uchicago.edu` all require the dead SSO. **Do not attempt them.** When Berkeley access arrives, swap in Berkeley's equivalents (UC Library Search / UC eLinks-successor + `berkeley.edu` EZproxy) — the click flow is identical. Historical UChicago recipe, kept for transfer:
 ```
-https://sfx.lib.uchicago.edu/sfx_local?atitle=<URL-encoded title>&anlast=<lastname>&date=<year>
+https://sfx.lib.uchicago.edu/sfx_local?atitle=<URL-encoded title>&anlast=<lastname>&date=<year>   # DEAD
 ```
-Or simply: `https://www.lib.uchicago.edu` + library search by DOI / title.
 
-User click flow:
-1. UChicago Find It! page → click the publisher link (Wiley / Springer / Elsevier / etc.).
-2. Lands on co-branded publisher page (e.g. "Wiley Online Library + UChicago Library").
+User click flow (as it worked at UChicago, and will again at Berkeley):
+1. Library "Find It!"-style page → click the publisher link (Wiley / Springer / Elsevier / etc.).
+2. Lands on co-branded publisher page (e.g. "Wiley Online Library + <University> Library").
 3. Click the Zotero Connector "Z" icon → choose the publisher-specific translator (e.g. "Save to Zotero (Wiley Online Library)").
 4. Zotero saves citation + Snapshot + Full Text PDF to the chosen collection.
 
@@ -104,10 +103,10 @@ Note the file may be the preprint version with minor textual differences from th
 ### Tier 7 — Surface to user (do NOT bypass auth)
 
 If Tiers 1-6 miss, do not attempt to bypass authentication. Recommend:
-- UChicago library proxy: `https://proxy.uchicago.edu/login?url=<publisher-url>`
-- LibKey Nomad browser extension at the publisher page
-- ILL request via UChicago library
-- Polite email to the corresponding author
+- Polite email to the corresponding author (the main route while no institutional access exists)
+- A colleague with live institutional access (e.g. a lab collaborator) pulling it via their library
+- Once Berkeley access exists (~Fall 2026): Berkeley library proxy, LibKey Nomad at the publisher page, or ILL via the Berkeley library
+- (The old UChicago routes — `proxy.uchicago.edu`, UChicago ILL — are dead; never suggest them)
 
 **Never** use Sci-Hub, Library Genesis, or other unauthorized mirrors. Recommend legitimate routes only.
 
@@ -146,7 +145,7 @@ The third check is critical. **Semantic Scholar's `pdfs.semanticscholar.org` URL
 
 | Mistake | Fix |
 |---|---|
-| In SYNC mode, going to Tier 1 first instead of Tier 0 | If user is present, Zotero+UChicago is one click. Don't waste 5 tiers of API calls. |
+| In SYNC mode (with live institutional access), going to Tier 1 first instead of Tier 0 | If user is present and Tier 0 is live, Zotero+library is one click. While Tier 0 is dormant (mid-2026 → Berkeley enrollment), Tier 1 first is correct. |
 | Trusting Unpaywall's `is_oa: false` and stopping | "Closed" ≠ "unfindable." Run Tier 4 next. |
 | Trusting Unpaywall's `is_oa: true` and assuming `curl` will work | Wiley OA → Cloudflare 403 to anonymous curl. Need real browser or institutional route. |
 | Saving an HTML paywall wrapper as `.pdf` | `file <path>` and size-check after every download. |
@@ -161,7 +160,7 @@ The third check is critical. **Semantic Scholar's `pdfs.semanticscholar.org` URL
 - "Wiley says it's OA, I'll just curl it" — Cloudflare blocks anonymous curl. Use Tier 0 or surface to user.
 - "I'll grab it from Sci-Hub real quick" — no. Recommend a legitimate route.
 
-## Pilot results (2026-04-30, refs 1–10 + 38, 45)
+## Pilot results (2026-04-30, refs 1–10 + 38, 45 — UChicago era, before the account closed)
 
 12 of 13 papers retrievable via Tier 0 (Zotero+UChicago) when user clicks once:
 
@@ -171,4 +170,4 @@ The third check is critical. **Semantic Scholar's `pdfs.semanticscholar.org` URL
 | Tier 6 — OSF preprint | 1 | Kennedy 2022 Guilford handbook chapter (book chapters not in journal catalogs) |
 | Bot-detection failures w/o Tier 0 | 3 | Wiley OA papers — Cloudflare 403 blocks curl; Tier 0 bypasses cleanly |
 
-**Headline lesson:** Tier 0 is now the default for SYNC mode. Tiers 1-6 remain the autonomous (ASYNC) path; Tier 4 (Google filetype:pdf) and Tier 6 (OSF preprint) cover the cases Zotero can't.
+**Headline lesson:** Tier 0 is the default for SYNC mode *when institutional access is live*. Tiers 1-6 remain the autonomous (ASYNC) path — and the everything path while Tier 0 is dormant; Tier 4 (Google filetype:pdf) and Tier 6 (OSF preprint) cover the cases Zotero can't.
