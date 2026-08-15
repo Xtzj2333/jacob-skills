@@ -1,0 +1,630 @@
+#!/usr/bin/env python3
+"""
+chrome-tab — open pages in a *chosen* Chrome window, quietly.
+
+Why this exists
+---------------
+`open file.html` (what Claude skills used to do) has three faults on this Mac:
+  1. it lands the tab in whichever Chrome window was last used — often an
+     unrelated one;
+  2. it yanks the frontmost app away from you (`open -g` does NOT fix this —
+     Chrome activates itself regardless; measured 2026-08-15);
+  3. the tab carries no marker saying which Claude session opened it.
+
+This tool instead drives Chrome's AppleScript interface, which can add a tab to
+a *specific* window by id without calling `activate`. Measured: no focus steal,
+and the target window is not raised inside Chrome either.
+
+Windows are addressed by their **given name** — the label you set with
+Chrome's right-click-the-tab-strip > "Name window…". Chrome exposes that as a
+read/write `given name` property, so Claude can both read the names you chose
+and label windows itself. No opaque window ids in conversation.
+
+Usage
+-----
+  chrome-tab list [--json]
+      Show every Chrome window: given name, tab count, active tab title.
+
+  chrome-tab open <url-or-path>... [options]
+      --window NAME    target the window with this given name
+      --new-window     force a fresh window (named via --window)
+      --activate       bring Chrome forward (default: stay out of your way)
+      --no-reuse       always add a tab, even if that URL is already open
+      --bind           remember this window for the rest of the session
+
+  chrome-tab name <selector> <new-name>
+      Give a window a name.  <selector> = window id, list index (#3),
+      'front', or an existing given name / title substring.
+
+  chrome-tab bind <NAME> | chrome-tab whoami | chrome-tab unbind
+      Manage this session's default window.
+
+Resolution order for the target window:
+  --window  >  $CLAUDE_CHROME_WINDOW  >  session binding  >  create one.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.parse
+from pathlib import Path
+
+US = "\x1f"  # unit separator between fields
+RS = "\x1e"  # record separator between windows
+
+STATE_DIR = Path.home() / ".claude" / "chrome-sessions"
+SESSION_ID = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get(
+    "CLAUDE_SESSION_ID"
+) or "no-session"
+
+
+# ----------------------------------------------------------------- AppleScript
+
+
+def osa(script, *args):
+    """Run an AppleScript, passing args as argv. Returns stdout stripped."""
+    proc = subprocess.run(
+        ["osascript", "-", *[str(a) for a in args]],
+        input=script,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        err = proc.stderr.strip()
+        if "-600" in err or "not running" in err.lower():
+            die("Google Chrome is not running.")
+        die(f"AppleScript failed: {err}")
+    return proc.stdout.rstrip("\n")
+
+
+def die(msg, code=1):
+    print(f"chrome-tab: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# NOTE: `repeat with w in windows` re-resolves the live window collection on
+# every iteration. With a heavy-tab user actively clicking between windows,
+# Chrome reorders mid-loop and you get duplicated/misaligned rows (observed
+# 2026-08-15). Bulk accessors (`id of every window`) snapshot in one shot.
+LIST_SCRIPT = f"""
+on run argv
+  tell application "Google Chrome"
+    set idList to id of every window
+    set gnList to given name of every window
+    set nmList to name of every window
+    set mnList to minimized of every window
+    set n to count of idList
+    set out to ""
+    repeat with i from 1 to n
+      set tc to 0
+      try
+        set tc to count of tabs of window i
+      end try
+      set out to out & (item i of idList as text) & "{US}" & (item i of gnList) & "{US}" & ¬
+        (tc as text) & "{US}" & (item i of mnList as text) & "{US}" & ¬
+        (item i of nmList) & "{RS}"
+    end repeat
+    return out
+  end tell
+end run
+"""
+
+
+def list_windows():
+    raw = osa(LIST_SCRIPT)
+    out = []
+    for i, rec in enumerate([r for r in raw.split(RS) if r.strip()], start=1):
+        parts = rec.split(US)
+        if len(parts) < 5:
+            continue
+        wid, given, count, minimized, title = parts[0], parts[1], parts[2], parts[3], parts[4]
+        out.append(
+            {
+                "index": i,
+                "id": wid.strip(),
+                "given_name": given.strip(),
+                "tabs": int(count) if count.strip().isdigit() else 0,
+                "minimized": minimized.strip().lower() == "true",
+                "title": title.strip(),
+            }
+        )
+    return out
+
+
+# --------------------------------------------------------------- window lookup
+
+
+def resolve_window(selector, windows=None):
+    """Resolve a human selector to a window dict, or None."""
+    if not selector:
+        return None
+    windows = windows if windows is not None else list_windows()
+    s = selector.strip()
+
+    # explicit list index  (#3 or 3)
+    m = re.fullmatch(r"#?(\d{1,2})", s)
+    if m:
+        idx = int(m.group(1))
+        for w in windows:
+            if w["index"] == idx:
+                return w
+
+    # raw window id (Chrome ids are long integers)
+    for w in windows:
+        if w["id"] == s:
+            return w
+
+    if s.lower() == "front":
+        return windows[0] if windows else None
+
+    # exact given name
+    for w in windows:
+        if w["given_name"] == s:
+            return w
+    # case-insensitive given name
+    for w in windows:
+        if w["given_name"].lower() == s.lower():
+            return w
+    # substring of given name
+    for w in windows:
+        if w["given_name"] and s.lower() in w["given_name"].lower():
+            return w
+    # substring of active tab title (last resort)
+    for w in windows:
+        if s.lower() in w["title"].lower():
+            return w
+    return None
+
+
+# ------------------------------------------------------------------ focus care
+
+
+def front_app():
+    """(name, bundleid) of the frontmost app, without needing Accessibility."""
+    try:
+        asn = subprocess.run(
+            ["lsappinfo", "front"], capture_output=True, text=True
+        ).stdout.strip()
+        if not asn:
+            return (None, None)
+        info = subprocess.run(
+            ["lsappinfo", "info", "-only", "name,bundleid", asn],
+            capture_output=True,
+            text=True,
+        ).stdout
+        name = re.search(r'"LSDisplayName"="([^"]*)"', info)
+        bid = re.search(r'"CFBundleIdentifier"="([^"]*)"', info)
+        return (name.group(1) if name else None, bid.group(1) if bid else None)
+    except Exception:
+        return (None, None)
+
+
+def restore_app(name, bundleid):
+    """Bring a previously-frontmost app back, best effort."""
+    if not name and not bundleid:
+        return
+    if name == "Google Chrome":
+        return
+    if bundleid:
+        subprocess.run(["open", "-b", bundleid], capture_output=True)
+    elif name:
+        subprocess.run(["open", "-a", name], capture_output=True)
+
+
+# ------------------------------------------------------------------- tab logic
+
+
+def to_url(target):
+    """Turn a file path into a properly-encoded file:// URL; pass URLs through."""
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", target):
+        return target
+    if target.startswith("about:") or target.startswith("chrome:"):
+        return target
+    p = Path(target).expanduser()
+    if p.exists() or target.startswith((".", "/", "~")):
+        abs_path = str(p.resolve())
+        return "file://" + urllib.parse.quote(abs_path, safe="/")
+    # bare domain like example.com
+    if "." in target and " " not in target:
+        return "https://" + target
+    return target
+
+
+CREATE_SCRIPT = """
+on run argv
+  set winName to item 1 of argv
+  set theURL to item 2 of argv
+  tell application "Google Chrome"
+    set w to make new window
+    if winName is not "" then set given name of w to winName
+    set URL of active tab of w to theURL
+    return id of w as text
+  end tell
+end run
+"""
+
+ADD_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  set theURL to item 2 of argv
+  tell application "Google Chrome"
+    set w to missing value
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        set w to ww
+        exit repeat
+      end if
+    end repeat
+    if w is missing value then return "ERR:nowindow"
+    make new tab at end of tabs of w with properties {URL:theURL}
+    return "added:" & ((count of tabs of w) as text)
+  end tell
+end run
+"""
+
+# Locate an already-open copy of this URL and report whether it is the tab the
+# window is currently showing. Combined with "is this window Chrome's front
+# window" and "is Chrome the frontmost app", that tells us whether the user is
+# looking at this page right now — in which case reloading it under him is rude.
+FIND_TAB_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  set theURL to item 2 of argv
+  tell application "Google Chrome"
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        set ai to active tab index of ww
+        set n to count of tabs of ww
+        repeat with i from 1 to n
+          if (URL of tab i of ww) is theURL then
+            return (i as text) & "|" & (ai as text)
+          end if
+        end repeat
+        return "0|" & (ai as text)
+      end if
+    end repeat
+    return "ERR:nowindow"
+  end tell
+end run
+"""
+
+RELOAD_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  set tabIdx to (item 2 of argv) as integer
+  set doSelect to (item 3 of argv is "1")
+  tell application "Google Chrome"
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        tell tab tabIdx of ww to reload
+        if doSelect then set active tab index of ww to tabIdx
+        return "ok"
+      end if
+    end repeat
+    return "ERR:nowindow"
+  end tell
+end run
+"""
+
+NAME_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  set newName to item 2 of argv
+  tell application "Google Chrome"
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        set given name of ww to newName
+        return "ok"
+      end if
+    end repeat
+    return "ERR:nowindow"
+  end tell
+end run
+"""
+
+ACTIVATE_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  tell application "Google Chrome"
+    activate
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        set index of ww to 1
+        return "ok"
+      end if
+    end repeat
+  end tell
+end run
+"""
+
+# Creating a window unavoidably raises it. This puts the window the user was
+# actually looking at back on top *without* calling activate — verified to work
+# on Chrome/macOS 2026-08-15.
+RAISE_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  tell application "Google Chrome"
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        set index of ww to 1
+        return "ok"
+      end if
+    end repeat
+    return "gone"
+  end tell
+end run
+"""
+
+
+# ------------------------------------------------------------ session bindings
+
+
+def binding_file():
+    return STATE_DIR / f"{SESSION_ID}.json"
+
+
+def read_binding():
+    f = binding_file()
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            return None
+    return None
+
+
+def write_binding(name):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    binding_file().write_text(
+        json.dumps({"session": SESSION_ID, "window_name": name, "cwd": os.getcwd()}, indent=2)
+    )
+
+
+def default_window_name():
+    """A readable per-session window name."""
+    explicit = os.environ.get("CLAUDE_CHROME_WINDOW")
+    if explicit:
+        return explicit
+    cwd = re.sub(r"\s*[\(\[]claude[\)\]]\s*$", "", Path.cwd().name, flags=re.I).strip()
+    if cwd in ("", "/", "Claude"):
+        cwd = "session"
+    return f"Claude · {cwd}"
+
+
+# ----------------------------------------------------------------- subcommands
+
+
+def cmd_list(args):
+    windows = list_windows()
+    if args.json:
+        print(json.dumps(windows, indent=2))
+        return
+    if not windows:
+        print("No Chrome windows open.")
+        return
+    b = read_binding()
+    bound = b.get("window_name") if b else None
+    name_w = max([len(w["given_name"]) for w in windows] + [11])
+    print(f"{'#':>2}  {'given name'.ljust(name_w)}  {'tabs':>4}  active tab")
+    print(f"{'':>2}  {'-' * name_w}  {'----':>4}  {'-' * 46}")
+    for w in windows:
+        given = w["given_name"] or "—"
+        mark = " ←bound" if bound and w["given_name"] == bound else ""
+        mini = " [minimized]" if w["minimized"] else ""
+        title = w["title"][:46]
+        print(f"{w['index']:>2}  {given.ljust(name_w)}  {w['tabs']:>4}  {title}{mini}{mark}")
+    unnamed = [w for w in windows if not w["given_name"]]
+    if unnamed:
+        print(
+            f"\n{len(unnamed)} window(s) have no given name. "
+            f"Name one with:  chrome-tab name '#<n>' 'Some Name'"
+        )
+
+
+def cmd_name(args):
+    w = resolve_window(args.selector)
+    if not w:
+        die(f"no window matches {args.selector!r}. Try: chrome-tab list")
+    res = osa(NAME_SCRIPT, w["id"], args.new_name)
+    if res.startswith("ERR"):
+        die(f"could not name window ({res})")
+    print(f"Window #{w['index']} is now named: {args.new_name}")
+
+
+def cmd_bind(args):
+    write_binding(args.name)
+    print(f"Session bound to Chrome window: {args.name}")
+
+
+def cmd_unbind(args):
+    f = binding_file()
+    if f.exists():
+        f.unlink()
+        print("Session binding removed.")
+    else:
+        print("No binding for this session.")
+
+
+def cmd_whoami(args):
+    b = read_binding()
+    print(f"session: {SESSION_ID}")
+    if b:
+        w = resolve_window(b["window_name"])
+        state = "exists" if w else "MISSING (will be recreated)"
+        print(f"window : {b['window_name']}  [{state}]")
+    else:
+        print(f"window : (unbound) — would use {default_window_name()!r}")
+
+
+def place_tab(win_id, url, win_is_front, chrome_is_front, args):
+    """Put `url` in window `win_id`, reusing an open copy unless the user is reading it.
+
+    Returns one of: 'added' | 'reused' | 'added-beside'.
+
+    'added-beside' is the interesting case: the page is already open AND it is
+    the tab the user is looking at this second. Reloading would scroll them back to
+    the top and collapse any <details> he had opened, mid-read. So we leave his
+    copy untouched and put the new render in a tab beside it. (His form answers
+    are never at risk either way — decision-forms-html persists them to
+    localStorage on every keystroke and restores them on load.)
+    """
+    if args.no_reuse:
+        osa(ADD_SCRIPT, win_id, url)
+        return "added"
+
+    info = osa(FIND_TAB_SCRIPT, win_id, url)
+    if info.startswith("ERR"):
+        die(f"could not inspect window ({info})")
+    idx_s, active_s = info.split("|")
+    idx, active_idx = int(idx_s), int(active_s)
+
+    if idx == 0:                      # not open here yet
+        osa(ADD_SCRIPT, win_id, url)
+        return "added"
+
+    jacob_is_reading_it = (idx == active_idx) and win_is_front and chrome_is_front
+    if jacob_is_reading_it and not args.force_reload:
+        osa(ADD_SCRIPT, win_id, url)
+        return "added-beside"
+
+    osa(RELOAD_SCRIPT, win_id, str(idx), "0" if args.no_select else "1")
+    return "reused"
+
+
+def cmd_open(args):
+    urls = [to_url(t) for t in args.targets]
+
+    # --- pick the target window -------------------------------------------
+    windows = list_windows()
+    target = None
+    wanted_name = args.window or os.environ.get("CLAUDE_CHROME_WINDOW")
+    if not wanted_name:
+        b = read_binding()
+        if b:
+            wanted_name = b.get("window_name")
+
+    if not args.new_window:
+        if wanted_name:
+            target = resolve_window(wanted_name, windows)
+        elif windows:
+            # No hint at all: refuse to guess silently. Use the bound-or-new name.
+            wanted_name = default_window_name()
+            target = resolve_window(wanted_name, windows)
+
+    created = False
+    if target is None:
+        name = wanted_name or default_window_name()
+        # Remember exactly where the user was, at both levels: which app was
+        # frontmost, and which Chrome window was on top inside Chrome.
+        fname, fbid = front_app()
+        prev_chrome_win = windows[0]["id"] if windows else None
+        wid = osa(CREATE_SCRIPT, name, urls[0])
+        if prev_chrome_win and not args.activate:
+            osa(RAISE_SCRIPT, prev_chrome_win)
+        if not args.activate:
+            restore_app(fname, fbid)
+        created = True
+        target = {"id": wid, "given_name": name, "index": 0, "title": "", "tabs": 1,
+                  "minimized": False}
+        urls = urls[1:]
+        if args.bind or not args.window:
+            write_binding(name)
+
+    # --- add the tabs ------------------------------------------------------
+    # Snapshot "where the user's eyes are" BEFORE touching anything.
+    chrome_is_front = front_app()[0] == "Google Chrome"
+    win_is_front = bool(windows) and target["id"] == windows[0]["id"]
+
+    results = []
+    for u in urls:
+        results.append((u, place_tab(target["id"], u, win_is_front, chrome_is_front, args)))
+
+    if args.bind and args.window:
+        write_binding(target["given_name"] or args.window)
+
+    if args.activate:
+        osa(ACTIVATE_SCRIPT, target["id"])
+
+    # --- report ------------------------------------------------------------
+    label = target["given_name"] or f"window {target['id']}"
+    if created:
+        print(f"✓ created Chrome window “{label}” · {len(args.targets)} tab(s)")
+    else:
+        n = lambda kind: sum(1 for _, r in results if r == kind)
+        bits = []
+        if n("added"):
+            bits.append(f"{n('added')} new tab(s)")
+        if n("reused"):
+            bits.append(f"{n('reused')} reloaded in place")
+        if n("added-beside"):
+            bits.append(f"{n('added-beside')} opened in a new tab beside the one you're reading")
+        print(f"✓ {' + '.join(bits) or 'nothing to do'} in Chrome window “{label}”")
+        if n("added-beside"):
+            print("  (left your open copy untouched — pass --force-reload to override)")
+    if target.get("minimized"):
+        print("  note: that window is minimized — the tab is there when you restore it.")
+    if not args.activate:
+        print("  (focus left where it was)")
+
+
+# ----------------------------------------------------------------------- main
+
+
+def require_macos_chrome():
+    """This tool drives Chrome through AppleScript, which exists only on macOS."""
+    if sys.platform != "darwin":
+        die("chrome-tab requires macOS — it drives Chrome via AppleScript (osascript).")
+    if not os.path.isdir("/Applications/Google Chrome.app") and not os.path.isdir(
+        os.path.expanduser("~/Applications/Google Chrome.app")
+    ):
+        die("Google Chrome not found in /Applications (or ~/Applications).")
+
+
+def main():
+    require_macos_chrome()
+    p = argparse.ArgumentParser(
+        prog="chrome-tab",
+        description="Open pages in a chosen Chrome window without stealing focus.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pl = sub.add_parser("list", help="list Chrome windows by name")
+    pl.add_argument("--json", action="store_true")
+    pl.set_defaults(func=cmd_list)
+
+    po = sub.add_parser("open", help="open url(s)/file(s) in a chosen window")
+    po.add_argument("targets", nargs="+")
+    po.add_argument("--window", "-w", help="target window given-name (or #index)")
+    po.add_argument("--new-window", action="store_true")
+    po.add_argument("--activate", action="store_true", help="bring Chrome forward")
+    po.add_argument("--no-reuse", action="store_true", help="never reload an existing tab")
+    po.add_argument("--force-reload", action="store_true",
+                    help="reload in place even if the user is currently reading that tab")
+    po.add_argument("--no-select", action="store_true",
+                    help="reload without changing which tab the window shows")
+    po.add_argument("--bind", action="store_true", help="remember this window for the session")
+    po.set_defaults(func=cmd_open)
+
+    pn = sub.add_parser("name", help="set a window's given name")
+    pn.add_argument("selector")
+    pn.add_argument("new_name")
+    pn.set_defaults(func=cmd_name)
+
+    pb = sub.add_parser("bind", help="bind this session to a window name")
+    pb.add_argument("name")
+    pb.set_defaults(func=cmd_bind)
+
+    sub.add_parser("unbind", help="drop this session's binding").set_defaults(func=cmd_unbind)
+    sub.add_parser("whoami", help="show this session's window binding").set_defaults(
+        func=cmd_whoami
+    )
+
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
