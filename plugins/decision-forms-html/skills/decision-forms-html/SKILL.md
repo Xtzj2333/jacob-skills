@@ -1,6 +1,6 @@
 ---
 name: decision-forms-html
-description: Use when building any HTML page that needs to collect answers from Jacob — radio choices with optional comments, per-question clear, sticky toolbar with Copy-all-as-Markdown / Download-JSON / Clear-all, localStorage persistence across sittings. Composable: drops into chat-substitute HTMLs (via chat-substitute-html), into literature reviews with inline "which paper?" picks, into mockups with variant choices, into any HTML where Claude has drafted options for Jacob to pick from. Skip when the page is purely informational with no asks back — then forms are noise, not navigation.
+description: Use when an HTML page for Jacob needs answers back from him — decisions to pick between, options to choose, comments to leave in place, or sections for him to dismiss. Applies to chat-substitutes, literature reviews with inline "which paper?" picks, mockups with variant choices, and any page where Claude has drafted options. Skip when the page is purely informational with no asks back — then forms are noise, not navigation.
 ---
 
 # decision-forms-html
@@ -32,13 +32,21 @@ And the toolbar, once per page (radios are click-to-uncheck; the per-question Cl
 </div>
 ```
 
-## Archive chip (chat-substitute pages)
+## Archive chip + paired comment box (chat-substitute pages)
+
+The chip never appears alone — these three elements are one unit, emitted together per section:
 
 ```html
 <button type="button" class="archive-chip" data-archive-target="section-id">Archive this?</button>
+<button type="button" class="chip-comment-toggle" data-comment-toggle="section-id">💬 Comment</button>
+<textarea class="chip-comment" data-chip-comment="section-id" placeholder="Comment on this card…" hidden></textarea>
 ```
 
-Click toggles "✓ marked to archive"; marks persist in the same storage entry, ride Copy-all as a final `## Archive marks` block (and the JSON download), and the next render moves marked sections to the archive and clears the marks. Style it obviously clickable — it must not read as a static tag. Pair every chip with a detail fold: a `<details>` beside it (obviously-clickable summary, e.g. "More detail") holding enough context — where the item came from, when, what archiving it means — for Jacob to judge it cold; a chip he can't place is a chip he can't click. When to use the chip lives in `chat-substitute-html`.
+**Chip:** click toggles "✓ marked to archive"; marks persist in the same storage entry, ride Copy-all as a final `## Archive marks` block (and the JSON download), and the next render moves marked sections to the archive and clears the marks.
+
+**Comment pair:** the toggle sits beside the chip and expands/collapses the textarea (collapsed by default so cards stay compact; expanding focuses it). Typed text persists in the same storage entry, rides Copy-all as a `## Card comments` block keyed by section id (JSON: `card_comments`), and follows correctness rule 3's PROCESSED auto-clear lifecycle like any other free-text box. A saved comment must never be invisible: on load the box reopens expanded and the toggle shows "✓ comment saved" (the reference JS does this). The section id becomes the heading Jacob pastes back, so keep it recognizable out of context.
+
+Style both buttons obviously clickable — they must not read as static tags. Pair every chip with a detail fold: a `<details>` beside it (obviously-clickable summary, e.g. "More detail") holding enough context — where the item came from, when, what archiving it means — for Jacob to judge it cold; a chip he can't place is a chip he can't click. When to use the chip lives in `chat-substitute-html`.
 
 ## Correctness rules
 

@@ -30,10 +30,17 @@
 //     <button type="button" data-form-action="clear-all">Clear all</button>
 //   </div>
 //
-// Archive chip (chat-substitute pages; see chat-substitute-html skill):
+// Archive chip + paired comment box (chat-substitute pages; see chat-substitute-html skill).
+// The three elements are one unit — never emit a chip without its comment pair:
 //   <button type="button" class="archive-chip" data-archive-target="section-id">Archive this?</button>
+//   <button type="button" class="chip-comment-toggle" data-comment-toggle="section-id">💬 Comment</button>
+//   <textarea class="chip-comment" data-chip-comment="section-id" placeholder="Comment on this card…" hidden></textarea>
 //   One click toggles "marked to archive"; marks persist in the same storage entry,
 //   ride the copy-all paste as an "## Archive marks" block, and the next render executes them.
+//   The comment toggle expands/collapses the textarea; card comments persist alongside,
+//   ride copy-all as a "## Card comments" block (keyed by section id) and the JSON
+//   download as card_comments, and follow the same PROCESSED auto-clear lifecycle as
+//   fieldset comment boxes (SKILL.md correctness rule 3).
 
 (function() {
   const STORAGE_KEY = 'html_form_responses_v1';  // namespace per report if needed
@@ -107,10 +114,34 @@
       if (b) setChip(b, true);
     });
   }
+  // --- Chip comments: click-to-expand comment box paired with each archive chip ---
+  function setCommentToggle(btn, hasText) {
+    btn.classList.toggle('has-comment', hasText);
+    btn.textContent = hasText ? '💬 ✓ comment saved' : (btn.dataset.label || '💬 Comment');
+  }
+  function getChipComments() {
+    const out = {};
+    document.querySelectorAll('textarea[data-chip-comment]').forEach(ta => {
+      const text = ta.value.trim();
+      if (text) out[ta.dataset.chipComment] = text;
+    });
+    return out;
+  }
+  function restoreChipComments() {
+    Object.entries(load()._chipComments || {}).forEach(([id, text]) => {
+      const ta = document.querySelector(`textarea[data-chip-comment="${id}"]`);
+      if (!ta) return;
+      ta.value = text;
+      ta.hidden = false;  // a saved comment must never be invisible
+      const btn = document.querySelector(`.chip-comment-toggle[data-comment-toggle="${id}"]`);
+      if (btn) setCommentToggle(btn, true);
+    });
+  }
 
   function persist() {
     const state = readForm();
     state._archiveMarks = getMarks();
+    state._chipComments = getChipComments();
     save(state);
   }
 
@@ -143,6 +174,12 @@
       md += `## Archive marks\n${marks.map(m => '- #' + m).join('\n')}\n\n`;
       answered += marks.length;
     }
+    const comments = getChipComments();
+    const commentIds = Object.keys(comments);
+    if (commentIds.length) {
+      md += `## Card comments\n${commentIds.map(id => `- **#${id}:** ${comments[id]}`).join('\n')}\n\n`;
+      answered += commentIds.length;
+    }
     if (answered === 0) { showToast('No answers to copy yet', '#a60'); return; }
     navigator.clipboard.writeText(md)
       .then(() => showToast(`Copied ${answered} response${answered === 1 ? '' : 's'}`))
@@ -150,7 +187,7 @@
   }
   function downloadJSON() {
     const payload = { generated_at: new Date().toISOString(), responses: readForm(),
-                      archive_marks: getMarks() };
+                      archive_marks: getMarks(), card_comments: getChipComments() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -165,6 +202,8 @@
     document.querySelectorAll('.decision-form input[type="radio"]').forEach(r => { r.checked = false; r._lastChecked = false; });
     document.querySelectorAll('.decision-form textarea').forEach(t => t.value = '');
     document.querySelectorAll('.archive-chip.marked').forEach(b => setChip(b, false));
+    document.querySelectorAll('textarea[data-chip-comment]').forEach(ta => { ta.value = ''; ta.hidden = true; });
+    document.querySelectorAll('.chip-comment-toggle').forEach(b => setCommentToggle(b, false));
     save({});
     showToast('Cleared all responses');
   }
@@ -215,10 +254,27 @@
         persist();
       });
     });
+    // Chip comment toggles + boxes
+    document.querySelectorAll('.chip-comment-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const ta = document.querySelector(`textarea[data-chip-comment="${btn.dataset.commentToggle}"]`);
+        if (!ta) return;
+        ta.hidden = !ta.hidden;
+        if (!ta.hidden) ta.focus();
+      });
+    });
+    document.querySelectorAll('textarea[data-chip-comment]').forEach(ta => {
+      ta.addEventListener('input', () => {
+        const btn = document.querySelector(`.chip-comment-toggle[data-comment-toggle="${ta.dataset.chipComment}"]`);
+        if (btn) setCommentToggle(btn, !!ta.value.trim());
+        persist();
+      });
+    });
   }
   function init() {
     restoreForm();
     restoreMarks();
+    restoreChipComments();
     wire();
     document.querySelectorAll('.decision-form input[type="radio"]:checked')
       .forEach(r => r._lastChecked = true);
