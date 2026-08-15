@@ -1,8 +1,8 @@
 # Changelog
 
-## 2026-08-15 — HTML-reply skill cluster refreshed; `decision-forms-html` gains comment boxes; ⚠️ one hook NOT to import
+## 2026-08-15 — HTML-reply skill cluster refreshed; new `chrome-tab` plugin; `decision-forms-html` gains comment boxes
 
-**TL;DR:** The four skills governing how Claude renders HTML replies were de-duplicated and republished, and all four now carry a `version` field for the first time (they had none, so `/plugin install` may previously have been a silent no-op — see the 2026-05-12 entry for that footgun). The one *functional* change: `decision-forms-html`'s `references/form-pattern.js` gained the **archive-chip comment box**. If you installed before today, your pages have chips but no comment boxes at all. **Separately: Jacob's env snapshot now contains a `PreToolUse` hook whose script does not exist on your machine — skip it if `env-compare` offers it.**
+**TL;DR:** Three things. (1) The four skills governing how Claude renders HTML replies were de-duplicated and republished, and all four now carry a `version` field for the first time — they had none, so `/plugin install` may previously have been a silent no-op (see the 2026-05-12 entry for that footgun). (2) The one *functional* change: `decision-forms-html`'s `references/form-pattern.js` gained the **archive-chip comment box** — if you installed before today, your pages have chips but no comment boxes at all. (3) **New plugin `chrome-tab`** (macOS + Chrome): opens rendered HTML in a *named* Chrome window without stealing focus. Related: Jacob's env snapshot now carries a `PreToolUse` hook that points into *his* filesystem — install the plugin and use its own installer rather than importing that path.
 
 ### Skill changes
 
@@ -25,9 +25,25 @@ The snapshot now includes a hook in `settings.json`:
     "command": "sh \"${HOME}/Claude/tools/chrome-tabs (claude)/hooks/block-bare-open.sh\"" }] }]
 ```
 
-That script belongs to `chrome-tab`, a Jacob-local macOS tool that is **not published to this marketplace**. On a machine without it the hook exits **127** — a hook error, which does *not* block anything, but will surface as noise on every Bash call. **Decline this item when `env-compare` walks you through the diff**, unless you want the tool too (ask Jacob — it isn't packaged yet).
+That script belongs to the `chrome-tab` tool. **If you haven't installed the new `chrome-tab` plugin (below), the path won't exist on your machine** and the hook exits **127** — a hook error, which does *not* block anything, but will surface as noise on every Bash call. Either install the plugin and let *its* installer register the hook at the right path, or decline this item when `env-compare` walks you through the diff. **Don't import the raw path** — it points into Jacob's `~/Claude/tools/`, not into your plugin cache.
 
 What it does, for context: it refuses `open <file>.html` in Bash, because on macOS that hands the file to whichever Chrome window was used last and pulls Chrome in front of whatever you were doing. (`open -g` does not help — Chrome activates itself regardless; measured.) The replacement, `chrome-tab`, puts the tab in a *named* Chrome window without stealing focus.
+
+### New plugin: `chrome-tab` v0.1.0 (macOS + Chrome only)
+
+Opens an HTML file or URL in a **named** Chrome window without stealing focus. Solves three faults of bare `open` on macOS: the tab lands in whichever window was used last, Chrome yanks itself in front of whatever you were doing, and the tab carries no marker of which session opened it. `open -g` does not fix the focus steal — Chrome activates regardless.
+
+```
+/plugin install chrome-tab@jacob-skills
+sh ~/.claude/plugins/cache/jacob-skills/*/plugins/chrome-tab/skills/chrome-tab/scripts/install.sh
+chrome-tab list
+```
+
+`install.sh` symlinks the tool into `~/.local/bin` and tells you if that isn't on your PATH. Pass `--hook` to also install the guard hook — it resolves its own location, so it registers the correct path for *your* machine rather than Jacob's.
+
+Two conventions the skill teaches Claude: **address Chrome windows by their given name** (the label from right-clicking the tab strip → "Name window…", which Chrome exposes as a read/write AppleScript property) rather than by opaque numeric ids; and **one reused window per project/topic**, because Chrome's coloured tab groups can't be scripted at all — they're an extension-only API that refuses `file://` URLs, so a named window is the only grouping available to local files.
+
+Skip this plugin entirely if you're not on macOS; the tool exits with a clear error elsewhere.
 
 Same caveat for the CLAUDE.md diff: Jacob's global §3 now says to open HTML with `chrome-tab` rather than `open`. That line is machine-specific — keep whatever works on yours.
 

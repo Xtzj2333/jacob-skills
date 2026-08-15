@@ -25,6 +25,7 @@ A Claude plugin marketplace bundling Jacob's research and manuscript-revision wo
 | `project-map` | Folder-orientation skill — creates and maintains `MAP.md` files at project roots so collaborators and future Claude sessions can find their way around. Handles legacy `INDEX.md` migration. |
 | `sync-cowork-skill` | Publishes a Cowork-side skill to its marketplace plugin folder with a mandatory diff + sensitive-content scan + explicit confirm gate. Cowork remains the source of truth (read-only here); GitHub is downstream. **Jacob-specific** — hardcoded to `~/jacob-skills/` as the marketplace clone path. Run from Claude Code only. |
 | `claude-env-sync` | Publishes a redacted snapshot of your Claude Code env (settings, MCP, CLAUDE.md, skills, installed plugins with version pinning, central reference files) to a git repo, then compares against another snapshot with item-by-item recommendations. **Jacob-internal** (cross-Mac sync for Jacob's setup) — published here so collaborators can also use it for their own env diffs. See [`plugins/claude-env-sync/QUICKSTART.md`](./plugins/claude-env-sync/QUICKSTART.md). |
+| `chrome-tab` | Opens an HTML file or URL in a **named** Chrome window without stealing focus — fixes bare `open` landing the tab in whichever window was used last and yanking Chrome in front of what you were doing (`open -g` does not help; Chrome activates regardless). Ships an optional `PreToolUse` hook that refuses `open <file>.html`. **macOS + Google Chrome only** — run `scripts/install.sh` after installing. |
 
 ## Install (Claude Code)
 
