@@ -1,6 +1,6 @@
 ---
 name: markdown-report-builder
-description: Build polished `.docx` (via pandoc reference doc) and `.pdf` (via Eisvogel LaTeX template) from a markdown source. Cross-project; one-time setup per project, then `./reports/build.sh report.md` produces a clean Word + PDF pair. Use when Jacob asks to "render this report" / "build a polished version" / "make a docx and pdf of X" — or proactively when producing a multi-page report he'll review.
+description: Use when Jacob asks to "render this report" / "build a polished version" / "make a docx and pdf of X" — or proactively when producing a multi-page report he'll review. Skip for quick notes, apa7/IEEE/ACM-class manuscripts, and Quarto-feature reports.
 ---
 
 # Markdown report builder
