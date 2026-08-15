@@ -1,6 +1,6 @@
 ---
 name: reports-catalog
-description: Use BEFORE choosing an output path for any rendered deliverable for Jacob (HTML report or chat-substitute, docx/pdf brief, rendered slides or images). Routes the file into the owning project's `reports (claude)/` folder, assigns the stage.version index by reading CATALOG.md, and appends the catalog row in the same turn. Also use when Jacob says "bump the stage/version", asks where a report should go, or wants an existing folder retrofitted. Not for manuscript files (`_PROPOSED` convention), data/code outputs, or the central `~/Claude/reports/` (Claude-infrastructure reports; keeps its own date-first convention).
+description: Use BEFORE choosing an output path for any rendered deliverable for Jacob — HTML report or chat-substitute, docx/pdf brief, rendered slides or images. Also when Jacob says "bump the stage/version", asks where a report should go, or wants an existing folder retrofitted. Not for manuscript files (`_PROPOSED` convention), data/code outputs, or the central `~/Claude/reports/` (Claude-infrastructure reports; keeps its own date-first convention).
 ---
 
 # reports-catalog
@@ -20,7 +20,7 @@ description: Use BEFORE choosing an output path for any rendered deliverable for
 - Index first (the folder sorts and groups by project era), date second (chronology within an era), short kebab-case slug last. No topic prefix: the folder already scopes the topic.
 - The index is a shared project-state tag: every deliverable produced during the same revision round carries the same `s.v`. It is not a per-file draft counter; three files tagged `s1.v2` mean they belong to the same round.
 - Multi-format deliverables (markdown source plus its docx/pdf builds from `markdown-report-builder`) share one prefix and one catalog row.
-- Chat-substitutes are the one exception: they keep stable un-prefixed names (`<topic>_chat-substitute.html`, per `chat-substitute-html`) so reopening always hits the same path, and they are listed in the catalog's Conversation surfaces section instead. When one is archived (`_ARCHIVE`), move its row under the era it belonged to.
+- Chat-substitutes are the one exception: they keep stable un-prefixed names (`<topic>_chat-substitute.html`, per `chat-substitute-html`) so reopening always hits the same path, and they are listed in the catalog's Conversation surfaces section instead. When one is archived (`_ARCHIVE`), move its row under the era it belonged to. Claude-infrastructure work has no owning project — its chat-substitutes go in `~/Claude/reports/<topic>/` under that folder's own convention.
 
 ## CATALOG.md, the load-bearing index
 
