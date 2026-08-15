@@ -1,11 +1,12 @@
 # What each skill does
 
-Eight collaborator-facing skills, grouped by purpose:
+Nine collaborator-facing skills, grouped by purpose:
 
 - **Citations** — `research-27` (produce), `citation-deepening` (verify content), `source-quality-check` (rate quality)
 - **Manuscript revision loop** — `commented-edit-roundtrip` (bridges margin comments and TODOs), `revision-queue` (state machine + audit log)
 - **Push utility** — `tony-github-push`
 - **Project navigation** — `project-map` (creates and maintains `MAP.md` orientation files at project roots)
+- **Reading what Claude renders** — `chrome-tab` (opens a page in a *named* Chrome window without stealing focus; macOS + Chrome only, and the one skill here that needs a post-install step)
 - **Cowork-only personal-life utility** — `calendar-search` (Google Calendar lookup; Jacob-personalized — install on Cowork, not Claude Code)
 
 > **Plus one utility skill** — `project-filename` — called by `revision-queue`, `commented-edit-roundtrip`, and `citation-deepening` to produce per-project filenames in the `<role> [<project>].<ext>` convention. You won't trigger it directly; the other skills invoke it. Documented in its own SKILL.md if you want the details.
@@ -28,6 +29,7 @@ Eight collaborator-facing skills, grouped by purpose:
 | 6 | tony-github-push | "tony github push" / `/tony-github-push` | Push of configured dir to configured branch | one configured dir |
 | 7 | calendar-search | "is X on my calendar" / "do I have a Y" / "when is my Z" | Located event with calendar name + source-zone time | every calendar in your account |
 | 8 | project-map | "set up a MAP" / "create a project map" / "orient me to this folder" | `MAP.md` at the folder root — folder structure, source/draft flags, provenance | one MAP per folder root |
+| 9 | chrome-tab | fires when Claude opens HTML for you; "wrong Chrome window" / "stop jumping my screen" | Page placed in a window you named, no focus steal | one reused window per project/topic |
 
 ---
 
@@ -312,6 +314,44 @@ One command for a routine push, with the right `cd` / branch / staging done for 
 **When NOT to use.** Quick `ls`-style questions. Anywhere a `README.md` is already authoritative and current. Folders that won't be touched again.
 
 **Why it's useful.** Future Claude sessions (and humans) can orient to a project in one read instead of reverse-engineering structure from filenames. Particularly load-bearing in research projects where the working tree has mixed source / draft / archive material that's not obvious from filenames alone.
+
+---
+
+## 9. chrome-tab — open a page in a *named* Chrome window, without stealing focus
+
+**Platform.** macOS + Google Chrome only. It drives Chrome's AppleScript interface; it exits with a clear message anywhere else.
+
+**Extra install step.** Unlike every other skill here, this one ships an executable. After `/plugin install chrome-tab@jacob-skills`, run its installer once to put the command on your PATH:
+
+```
+sh ~/.claude/plugins/cache/jacob-skills/*/plugins/chrome-tab/skills/chrome-tab/scripts/install.sh
+chrome-tab list
+```
+
+**The problem it solves.** `open report.html` has three faults: macOS hands the file to whichever Chrome window was used *last* (so a report lands in an unrelated window), it pulls Chrome in front of whatever you were doing, and the tab carries no marker of which session opened it. `open -g` does **not** fix the focus steal — Chrome activates itself regardless (measured, not assumed).
+
+**Trigger phrases.** Fires whenever Claude is about to open an HTML file or URL in Chrome for you, and on "which Chrome window is X in", "pages keep opening in the wrong window", "stop jumping my screen".
+
+**Usage.**
+
+```
+chrome-tab list                                # windows by name, not by opaque id
+chrome-tab open report.html --window "educ"    # place it there, quietly
+chrome-tab open report.html --activate         # ...and bring Chrome forward
+chrome-tab name "#3" "mail archive"            # label an unnamed window
+```
+
+**Windows are addressed by name.** Chrome exposes the label you set by right-clicking the tab strip → "Name window…" as a read/write `given name` property. So Claude can ask "the `educ` window or the `LLM and Culture` one?" instead of quoting `940044950`, and can label an unnamed window for you.
+
+**Named windows are the only grouping available.** Chrome's coloured tab groups cannot be scripted — extension-only API — and the Claude-in-Chrome extension refuses `file://` URLs. So local report files can never join a coloured group; one reused window per project/topic is the workable convention.
+
+**Re-opening a file that's already open** reloads that tab in place instead of piling up duplicates — unless you're reading it right now (Chrome frontmost + that window on top + that tab active), in which case the new render opens beside your copy and your view is left alone.
+
+**Optional guard hook.** `scripts/install-hook.py` adds a `PreToolUse`/`Bash` hook that refuses `open <file>.html` and names the replacement, so the habit can't survive a session that never read this skill. It short-circuits in shell (~3.6 ms) unless the command contains "open" at all, and ignores `open -a`/`-b`, folders, PDFs, `openssl`, and `chrome-tab open` itself. `--remove` undoes it; it backs up `settings.json` first. **It registers your own machine's path** — don't copy Jacob's hook entry out of a snapshot.
+
+**When to use.** Any setup where Claude renders HTML for you to read (see the render-before-review convention) and you keep more than one Chrome window open.
+
+**Why it's useful.** Reports stop landing in random windows, and Claude stops yanking your screen mid-task.
 
 ---
 
