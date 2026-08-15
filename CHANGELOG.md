@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-08-15 — HTML-reply skill cluster refreshed; `decision-forms-html` gains comment boxes; ⚠️ one hook NOT to import
+
+**TL;DR:** The four skills governing how Claude renders HTML replies were de-duplicated and republished, and all four now carry a `version` field for the first time (they had none, so `/plugin install` may previously have been a silent no-op — see the 2026-05-12 entry for that footgun). The one *functional* change: `decision-forms-html`'s `references/form-pattern.js` gained the **archive-chip comment box**. If you installed before today, your pages have chips but no comment boxes at all. **Separately: Jacob's env snapshot now contains a `PreToolUse` hook whose script does not exist on your machine — skip it if `env-compare` offers it.**
+
+### Skill changes
+
+| Plugin | v | What changed |
+|---|---|---|
+| `chat-substitute-html` | 0.2.0 | 756 → 560 words. Rule 3's 448-word paragraph became six scannable sub-points. Rule 1 no longer restates file placement (that's `reports-catalog`'s job) or the open-mechanism (that's the user's `CLAUDE.md`). Every rule preserved — nothing dropped, only relocated. |
+| `decision-forms-html` | 0.2.0 | **`form-pattern.js` 231 → 287 lines: archive chips now have paired comment boxes** (`chipComment` — persists to localStorage, rides Copy-all as a `## Card comments` block, follows the PROCESSED auto-clear lifecycle). Description rewritten to name triggers rather than list features. |
+| `reports-catalog` | 0.2.0 | Description trimmed of its procedure recital. Absorbed the "Claude-infrastructure work has no owning project" placement rule that `chat-substitute-html` had been duplicating. |
+| `markdown-report-builder` | 0.2.0 | Description now opens with "Use when Jacob asks to…" instead of describing the pipeline (the body already does that). No behaviour change. |
+
+The organising principle was **one home per fact**: three facts were each stated in three or four places, so each now lives in exactly one skill and the others cross-reference it.
+
+### ⚠️ If you run `env-compare` against `jacob_main.json`: skip the hook
+
+The snapshot now includes a hook in `settings.json`:
+
+```json
+"PreToolUse": [{ "matcher": "Bash",
+  "hooks": [{ "type": "command",
+    "command": "sh \"${HOME}/Claude/tools/chrome-tabs (claude)/hooks/block-bare-open.sh\"" }] }]
+```
+
+That script belongs to `chrome-tab`, a Jacob-local macOS tool that is **not published to this marketplace**. On a machine without it the hook exits **127** — a hook error, which does *not* block anything, but will surface as noise on every Bash call. **Decline this item when `env-compare` walks you through the diff**, unless you want the tool too (ask Jacob — it isn't packaged yet).
+
+What it does, for context: it refuses `open <file>.html` in Bash, because on macOS that hands the file to whichever Chrome window was used last and pulls Chrome in front of whatever you were doing. (`open -g` does not help — Chrome activates itself regardless; measured.) The replacement, `chrome-tab`, puts the tab in a *named* Chrome window without stealing focus.
+
+Same caveat for the CLAUDE.md diff: Jacob's global §3 now says to open HTML with `chrome-tab` rather than `open`. That line is machine-specific — keep whatever works on yours.
+
+### Pickup on the collaborator side
+
+```
+/plugin marketplace update jacob-skills
+/plugin install chat-substitute-html@jacob-skills
+/plugin install decision-forms-html@jacob-skills
+/plugin install reports-catalog@jacob-skills
+/plugin install markdown-report-builder@jacob-skills
+```
+
+Verify the comment-box fix actually landed — the one worth checking, since it's the only functional change:
+
+```
+grep -c chipComment ~/.claude/plugins/cache/jacob-skills/*/plugins/decision-forms-html/skills/decision-forms-html/references/form-pattern.js
+```
+
+Should print **4**. If it prints 0, the marketplace update didn't take: confirm your marketplace clone is current, then reinstall.
+
+---
+
 ## 2026-05-22 — `jacob-todos` v0.2 (full system bundled, not just SKILL.md)
 
 **TL;DR:** `jacob-todos` previously shipped trigger-only (just `SKILL.md`). v0.2 bundles the real machinery — scripts, instruction docs, sanitized JSON templates — under `skills/jacob-todos/system/`, with a first-time-setup section in `SKILL.md` that scaffolds `<workspace>/to do/` on demand. Calendar IDs are no longer hard-coded in `gcal_todo_instructions.md`; they live in `state_v3.json.calendar_config` so a new user fills them in once.
