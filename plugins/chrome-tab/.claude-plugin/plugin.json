@@ -1,7 +1,7 @@
 {
   "name": "chrome-tab",
-  "description": "Use when opening an HTML file or URL in Chrome for the user on macOS \u2014 a rendered report, a local deliverable, any file:// page \u2014 or when the user asks which Chrome window something is in, or says pages open in the wrong window, jump the screen, or steal focus while they are working. macOS with Google Chrome only.",
-  "version": "0.1.0",
+  "description": "Use when opening an HTML file or URL in Chrome for the user on macOS — a rendered report, a local deliverable, any file:// page — or when the user asks which Chrome window something is in, or says pages open in the wrong window, jump the screen, or steal focus while they are working. macOS with Google Chrome only.",
+  "version": "0.1.1",
   "author": {
     "name": "Jacob Zhang"
   }
