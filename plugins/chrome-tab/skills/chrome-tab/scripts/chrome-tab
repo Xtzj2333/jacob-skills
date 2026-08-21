@@ -12,8 +12,11 @@ Why this exists
   3. the tab carries no marker saying which Claude session opened it.
 
 This tool instead drives Chrome's AppleScript interface, which can add a tab to
-a *specific* window by id without calling `activate`. Measured: no focus steal,
-and the target window is not raised inside Chrome either.
+a *specific* window by id without calling `activate`. Chrome still raises itself
+when a tab's URL is set — twice, the second time ~0.4 s later (measured
+2026-08-20) — so the tool watches the front app for a moment afterwards and puts
+the user's app and Chrome's window order back each time. Net effect: a blink at
+most, no steal, and the target window is not left raised inside Chrome.
 
 Windows are addressed by their **given name** — the label you set with
 Chrome's right-click-the-tab-strip > "Name window…". Chrome exposes that as a
@@ -494,8 +497,45 @@ def place_tab(win_id, url, win_is_front, chrome_is_front, args):
     return "reused"
 
 
+FOCUS_LOG = Path.home() / ".claude" / "chrome-tab-focus.log"
+
+
+def settle_focus(pre_name, pre_bid, prev_front_win, target_id, window=1.6, step=0.1):
+    """Undo Chrome's self-activation after a URL is set, including the delayed one.
+
+    Polls the frontmost app for `window` seconds; whenever Chrome has taken it
+    (and the user was not in Chrome to begin with), raises the window the user
+    had on top inside Chrome again and brings their app back. Measured: the
+    second activation lands ~0.4 s after the first, and nothing follows it, so
+    1.6 s of watching covers it with margin. Costs up to 1.6 s per `chrome-tab
+    open`, which runs once per render.
+    """
+    import time
+    if not pre_bid or pre_bid == "com.google.Chrome":
+        # User was in Chrome already: there is no app to go back to, but the
+        # window they were looking at can still be put back on top.
+        if prev_front_win and prev_front_win != target_id:
+            osa(RAISE_SCRIPT, prev_front_win)
+        return
+    deadline = time.time() + window
+    fixes = 0
+    while True:
+        if front_app()[1] == "com.google.Chrome":
+            if prev_front_win and prev_front_win != target_id:
+                osa(RAISE_SCRIPT, prev_front_win)
+            restore_app(pre_name, pre_bid)
+            fixes += 1
+        if time.time() >= deadline:
+            break
+        time.sleep(step)
+    return fixes
+
+
 def cmd_open(args):
     urls = [to_url(t) for t in args.targets]
+    # Who is in front before we touch anything. Measured again at the end, so
+    # the closing line is a reading, not a promise.
+    before_name = front_app()[0]
 
     # --- pick the target window -------------------------------------------
     windows = list_windows()
@@ -535,12 +575,27 @@ def cmd_open(args):
 
     # --- add the tabs ------------------------------------------------------
     # Snapshot "where the user's eyes are" BEFORE touching anything.
-    chrome_is_front = front_app()[0] == "Google Chrome"
+    pre_name, pre_bid = front_app()
+    chrome_is_front = pre_name == "Google Chrome"
     win_is_front = bool(windows) and target["id"] == windows[0]["id"]
+    prev_front_win = windows[0]["id"] if windows else None
 
     results = []
     for u in urls:
         results.append((u, place_tab(target["id"], u, win_is_front, chrome_is_front, args)))
+
+    # Setting a tab's URL by AppleScript raises Chrome — measured 2026-08-20 with
+    # the user idle and Slack in front, every time, for https and file:// alike.
+    # (Creating an empty tab does not; reloading does not; it is the URL set.)
+    # Worse, it does so TWICE: once immediately, and again ~0.4 s later, when
+    # the navigation commits — so a single restore right after the call is
+    # undone before anyone sees it. That is why this path looked clean when it
+    # was "measured" on 15 Aug and why the restore-focus trial's one real catch
+    # (16 Aug 17:40, two tabs added to "FE" 27 s before the turn ended) was
+    # chrome-tab itself, not the extension. Fix: watch the front app for a
+    # moment after placing tabs and put things back each time Chrome grabs it.
+    if not args.activate and any(r in ("added", "added-beside") for _, r in results):
+        settle_focus(pre_name, pre_bid, prev_front_win, target["id"])
 
     if args.bind and args.window:
         write_binding(target["given_name"] or args.window)
@@ -567,7 +622,24 @@ def cmd_open(args):
     if target.get("minimized"):
         print("  note: that window is minimized — the tab is there when you restore it.")
     if not args.activate:
-        print("  (focus left where it was)")
+        after_name = front_app()[0]
+        if after_name == before_name or before_name is None:
+            print("  (focus left where it was)")
+        else:
+            # Until 2026-08-20 this line was printed unconditionally, which made
+            # chrome-tab's own output useless for telling whether a focus change
+            # seen by the restore-focus trial was chrome-tab's doing. Now it is
+            # measured, and a deviation goes into the same log the trial reads.
+            print(f"  ⚠ focus moved from {before_name} to {after_name} during this call — "
+                  "that is a chrome-tab bug; tell Claude")
+            try:
+                import time
+                with FOCUS_LOG.open("a") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  chrome-tab  moved focus "
+                            f"{before_name} → {after_name} while opening in “{label}”"
+                            f"{' (new window)' if created else ''}\n")
+            except Exception:
+                pass
 
 
 # ----------------------------------------------------------------------- main

@@ -90,7 +90,9 @@ def main():
     SETTINGS.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS.write_text(json.dumps(cfg, indent=2) + "\n")
     print(f"Hook {action} in {SETTINGS}")
-    print("Takes effect in new Claude Code sessions (existing ones keep their loaded config).")
+    print("Live immediately — Claude Code file-watches settings.json, so running sessions\n"
+          "pick hooks up without a restart (verified 2026-08-15). Note this differs from\n"
+          "CLAUDE.md rules, which ARE frozen into a session at startup.")
 
 
 if __name__ == "__main__":

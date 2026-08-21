@@ -43,8 +43,32 @@ Form state is never at risk either way: pages built with `decision-forms-html` p
 
 `scripts/install-hook.py` adds a `PreToolUse`/`Bash` hook that refuses `open <file>.html` and names the replacement, so the habit can't survive a session that never read this skill. It exits in shell (~3.6 ms) unless the command contains "open" at all. It ignores `open -a`/`-b`, folders, PDFs, `openssl`, and `chrome-tab open`. `--remove` undoes it; it backs up `settings.json` first.
 
+## Optional restore-focus hooks (experimental)
+
+`scripts/install-focus-hook.py` adds a second, separate pair: `PreToolUse` on
+`mcp__claude-in-chrome__.*` records where the user was before Claude browses, and `Stop` puts them
+back — app, Chrome window, and tab index. It acts only when it is confident (nothing to undo if the
+user isn't in Chrome at end of turn, or was already in Chrome when Claude started); every decision is
+logged under `CHROME_TAB_FOCUS_DEBUG=1`.
+
+**Status: unproven.** Measured 2026-08-15 on a quiet machine, no browser operation stole focus at all
+— not tab-group creation, navigation, or screenshots. Earlier readings that suggested otherwise were
+contaminated by the user's own clicking. So install it as an *instrument* (does the steal ever happen
+in real use?) rather than as a known fix. It cannot distinguish "the extension pulled you into Chrome"
+from "you walked into Chrome yourself", so it will occasionally put you back when you didn't want it.
+
+A `RESTORED` in the log is a **candidate**, not a finding: anything else that drives app focus —
+another session's AppleScript `activate`, `open -a`, a screen recorder, or `chrome-tab` itself —
+produces the same line. `scripts/focus-log-report.py` checks each RESTORED against the session
+transcripts for exactly that and says whether it is admissible. The one catch so far (2026-08-16)
+turned out to be `chrome-tab`'s own add-tab path, fixed 2026-08-20 — the extension has never been
+seen to move focus across two controlled runs (`scripts/focus-probe.sh` is the probe used).
+
+A `restore-focus.sh` wrapper exits in ~5.7 ms when no snapshot is pending — worth having because the
+`Stop` half has no matcher and so runs on every turn of every session.
+
 ## Limits
 
 - macOS + Google Chrome only; the tool exits with a clear error elsewhere.
-- Creating a *new* window unavoidably raises it — the tool restores both the previous frontmost app and Chrome's window order afterwards, but there is a brief flash.
+- Chrome raises itself whenever a tab's URL is set by AppleScript — new window *or* existing one — and does it twice, the second time ~0.4 s later. The tool watches for ~1.6 s after placing tabs and restores the user's app and Chrome's window order each time, so the worst case is a blink. (Until 2026-08-20 only the new-window path was restored, and only once; adding a tab to an existing window stole focus outright. The closing line "(focus left where it was)" is now a measurement, not a promise — if it ever says focus moved, that is a bug report.)
 - Reuse searches only the target window; a copy dragged to another window won't refresh.
