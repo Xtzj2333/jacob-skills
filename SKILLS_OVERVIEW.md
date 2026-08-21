@@ -328,6 +328,8 @@ sh ~/.claude/plugins/cache/jacob-skills/*/plugins/chrome-tab/skills/chrome-tab/s
 chrome-tab list
 ```
 
+Re-run that `install.sh` line after every `claude plugin update chrome-tab@jacob-skills`: the command on your PATH is a symlink into the *versioned* plugin cache, so an update leaves it pointing at the old copy until you do.
+
 **The problem it solves.** `open report.html` has three faults: macOS hands the file to whichever Chrome window was used *last* (so a report lands in an unrelated window), it pulls Chrome in front of whatever you were doing, and the tab carries no marker of which session opened it. `open -g` does **not** fix the focus steal — Chrome activates itself regardless (measured, not assumed).
 
 **Trigger phrases.** Fires whenever Claude is about to open an HTML file or URL in Chrome for you, and on "which Chrome window is X in", "pages keep opening in the wrong window", "stop jumping my screen".
