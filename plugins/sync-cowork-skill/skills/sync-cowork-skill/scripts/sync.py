@@ -67,7 +67,7 @@ THIRD_PARTY_MARKERS = {
     "CHANGELOG.md",
 }
 # Patterns inside the SOURCE folder we never want to copy into the published plugin.
-SKIP_REL_NAMES = {".DS_Store", "_archive", "test-run.log", ".git"}
+SKIP_REL_NAMES = {".DS_Store", "_archive", "test-run.log", ".git", "__pycache__"}
 
 SENSITIVE_PATTERNS: list[tuple[str, str]] = [
     (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "email address"),
