@@ -1,7 +1,7 @@
 {
   "name": "chat-substitute-html",
-  "description": "Conventions for HTMLs that stand in for chat \u2014 pin, what's-new surface, locked-decision economy, bi-file iteration pattern. Used when Claude's reply to Jacob would be too long for chat. Form mechanics come from decision-forms-html (cross-referenced).",
-  "version": "0.2.0",
+  "description": "Use when Claude's reply to Jacob would be a long or multi-paragraph chat message, or carries decisions Claude needs back. This is the default reply channel — chat is reserved for brief interactions. Skip when the HTML is itself the deliverable (literature reviews, study mockups, demos, info pages, frontend tools) — those need full creative range, not a reply substitute.",
+  "version": "0.3.0",
   "author": {
     "name": "Jacob Zhang"
   }

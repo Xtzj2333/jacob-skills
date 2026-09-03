@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-09-03 — `chrome-tab` 0.1.2: the blink is gone (re-run `install.sh`); `chat-substitute-html` 0.3.0 trimmed
+
+**TL;DR for anyone on `chrome-tab` 0.1.0 or 0.1.1:** opening a page could pull Chrome in front of you and shove you back 100–400 ms later, *twice per page*. That was the tool's own design, not a Chrome bug, and 0.1.2 fixes it. Update and re-run the installer:
+
+```
+/plugin update jacob-skills
+sh ~/.claude/plugins/cache/jacob-skills/*/plugins/chrome-tab/skills/chrome-tab/scripts/install.sh
+```
+
+### What was actually wrong
+
+Setting a tab's URL over AppleScript **asks macOS to bring Chrome forward** — new window or existing one, and Chrome asks twice, the second time ~0.4 s later. Creating an empty tab and reloading do not. The tool cannot suppress the request; it can only undo it.
+
+0.1.1 undid it *after the fact*: a 100 ms poll noticed Chrome in front, then `open -b` took another 100–300 ms to put you back. Two visible blinks per render, by design. 0.1.2 arms the guard **before** the navigation is sent — a thread polling the frontmost app every 3 ms, re-activating your app in-process via PyObjC, watching until 1.6 s past the call so the delayed second raise is caught too. `open -b` stays as the fallback if macOS ignores the polite request for 250 ms.
+
+### The rule 0.1.2 enforces: nothing you are looking at changes
+
+Not your app, not Chrome's window order, not the tab of a window you have in front, not whether a window is minimized. Concretely:
+
+- A new tab opens **behind** the tab you're reading (tab selection never raises anything, so this is silent); if you're not looking at that window, the new tab is left selected so it's what you see when you come to it.
+- Chrome's window order is restored, then re-checked after the 1.6 s watch.
+- A minimized target window is **re-minimized** — adding a tab un-minimizes it (measured), which is where stray windows were coming from.
+- Reloads skip the watch entirely (reloading never activates Chrome), so re-renders are quick again.
+- Every run reports what happened: how many times Chrome came forward and for how long, plus `(focus left where it was)`. Those closing lines are measurements, not promises — anything else is a bug report. A `guard` line lands in `~/.claude/chrome-tab-focus.log` whenever Chrome came forward at all.
+
+`--activate` remains the explicit opt-out when you *do* want to be taken to the page.
+
+### A finding worth knowing if you ever measure focus on macOS
+
+macOS (26.5) **declines activation requests from apps you aren't using while you're actively using the one in front**, and grants them once you've been idle a while. Measured 2026-08-20 (idle 200+ s): Chrome took the front on every navigation. Measured 2026-09-03 (keyboard touched 3–20 s earlier): Chrome never got it, and neither did an `open -b` from our own script.
+
+Two consequences. The flash shows up when you're *reading or thinking*, not when you're typing — which is why it feels random. And any focus test that printed "measured clean" while a human was at the keyboard proved nothing. `scripts/focus-regression.py` (new in 0.1.2) is the harness that waits for a 4-minute idle window before it measures, and aborts the moment you touch anything.
+
+### Requirements and the one limit left
+
+The fast path needs **PyObjC** (`python3 -c "import AppKit"`). Without it the guard degrades to the old 50 ms / `open -b` behaviour rather than failing.
+
+The limit: there is no way to load a page into a Chrome tab over AppleScript without making that activation request, so the tool still *undoes* the raise rather than preventing it. The only route with zero requests is a Chrome extension plus a native-messaging host; not built, and deliberately deferred until the guard's own log lines say how long the intervals actually are.
+
+### Restore-focus hooks: recommended OFF
+
+`scripts/install-focus-hook.py` installed an experimental `PreToolUse`/`Stop` pair that recorded where you were before Claude browsed and put you back afterwards. **Remove them** — `python3 .../scripts/install-focus-hook.py --remove`. They answered their question on 2026-08-20 (the Claude-in-Chrome extension never moves focus). Left installed, their only remaining effect was on *you*: they fired five times over a week, every one right after a `chrome-tab open`, restoring you out of the page you had just walked into Chrome to read. The `block-bare-open` guard hook is unaffected and stays.
+
+### `chat-substitute-html` 0.3.0 — 494 → 325 body words
+
+Every rule was traced to where it came from. Restored one sentence that had been dropped: *it is not a template — no mandated sections, banners, pills, or layout; write it the way you'd write the chat reply.* Dropped two mandates that Claude had added to rule 3 without approval (create the archive file empty in the same turn; pins are single-occupancy). Rule 4 compressed, rules 1/2/5 untouched. Behaviour is unchanged everywhere the behaviour was Jacob's — this is a de-accretion pass, not a redesign. Plugin description also replaced; the old one still advertised a shape the skill retired in July.
+
+### `sync-cowork-skill` — no longer publishes `__pycache__`
+
+A source skill whose scripts get imported at runtime leaves `scripts/__pycache__/*.pyc` behind, and the sync copied it into the published plugin, so machine-specific bytecode was shipping to collaborators. The skills repo already gitignored it; the sync path did not. Fixed.
+
 ## 2026-08-15 — HTML-reply skill cluster refreshed; new `chrome-tab` plugin; `decision-forms-html` gains comment boxes
 
 **TL;DR:** Three things. (1) The four skills governing how Claude renders HTML replies were de-duplicated and republished, and all four now carry a `version` field for the first time — they had none, so `/plugin install` may previously have been a silent no-op (see the 2026-05-12 entry for that footgun). (2) The one *functional* change: `decision-forms-html`'s `references/form-pattern.js` gained the **archive-chip comment box** — if you installed before today, your pages have chips but no comment boxes at all. (3) **New plugin `chrome-tab`** (macOS + Chrome): opens rendered HTML in a *named* Chrome window without stealing focus. Related: Jacob's env snapshot now carries a `PreToolUse` hook that points into *his* filesystem — install the plugin and use its own installer rather than importing that path.
