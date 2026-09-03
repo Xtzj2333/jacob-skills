@@ -33,9 +33,13 @@ Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--no-reuse`, `-
 
 **One reused window per project/topic.** The window *is* the grouping. Chrome's coloured tab groups cannot be scripted at all — they are an extension-only API, and the Claude-in-Chrome extension refuses `file://` URLs — so a named window is the only per-session grouping available to local files.
 
+## Nothing the user is looking at changes
+
+That is the rule the tool enforces (since 2026-09-03): not their app, not Chrome's window order, not the tab of a window they have in front, not whether a window is minimized. A page opens in the background and is there when they look. Concretely: if Chrome is frontmost and the target window is the one on top, a new tab is added *behind* the tab they are on and a reload doesn't switch tabs; otherwise the new or reloaded tab is left selected so it is what they see when they come to that window. A minimized target is re-minimized right after (Chrome un-minimizes it on navigation — measured). `--activate` is the explicit opt-out.
+
 ## Re-opening a file that is already open
 
-It reloads that tab in place rather than piling up duplicates — **unless the user is reading it right now** (Chrome frontmost + that window on top + that tab active), in which case the new render opens in a tab beside their copy and their view is left alone.
+It reloads that tab in place rather than piling up duplicates — **unless the user is reading it right now** (Chrome frontmost + that window on top + that tab active), in which case the new render opens in a tab behind their copy and their view is left alone.
 
 Form state is never at risk either way: pages built with `decision-forms-html` persist to `localStorage` on every keystroke and restore on load. What a reload costs is scroll position and open `<details>`.
 
@@ -43,7 +47,9 @@ Form state is never at risk either way: pages built with `decision-forms-html` p
 
 `scripts/install-hook.py` adds a `PreToolUse`/`Bash` hook that refuses `open <file>.html` and names the replacement, so the habit can't survive a session that never read this skill. It exits in shell (~3.6 ms) unless the command contains "open" at all. It ignores `open -a`/`-b`, folders, PDFs, `openssl`, and `chrome-tab open`. `--remove` undoes it; it backs up `settings.json` first.
 
-## Optional restore-focus hooks (experimental)
+## Optional restore-focus hooks (experimental — recommended OFF since 2026-09-03)
+
+**Verdict 2026-09-03:** remove them (`scripts/install-focus-hook.py --remove`, run by the user — done on this Mac 2026-09-03 02:22). They answered their question on 2026-08-20 (the extension never moves focus). Left installed, their only remaining effect was on the user: five `RESTORED` firings 27 Aug–1 Sep, every one within a minute of a `chrome-tab open` in the same session — the user had walked into Chrome to read the page just opened, and the Stop hook "restored" them to the app they had been in before. The rest of this section is the history.
 
 `scripts/install-focus-hook.py` adds a second, separate pair: `PreToolUse` on
 `mcp__claude-in-chrome__.*` records where the user was before Claude browses, and `Stop` puts them
@@ -70,5 +76,6 @@ A `restore-focus.sh` wrapper exits in ~5.7 ms when no snapshot is pending — wo
 ## Limits
 
 - macOS + Google Chrome only; the tool exits with a clear error elsewhere.
-- Chrome raises itself whenever a tab's URL is set by AppleScript — new window *or* existing one — and does it twice, the second time ~0.4 s later. The tool watches for ~1.6 s after placing tabs and restores the user's app and Chrome's window order each time, so the worst case is a blink. (Until 2026-08-20 only the new-window path was restored, and only once; adding a tab to an existing window stole focus outright. The closing line "(focus left where it was)" is now a measurement, not a promise — if it ever says focus moved, that is a bug report.)
+- Setting a tab's URL by AppleScript *asks* macOS to bring Chrome forward — new window or existing one, twice, the second time ~0.4 s later (creating an empty tab and reloading do not). Whether macOS grants it depends on the user: measured 2026-08-20 (user idle 200+ s, Slack in front) it was granted every time; measured 2026-09-03 (user had touched the keyboard 3–20 s earlier) it was never granted, and neither was an `open -b` from the tool. So the flash happens when the user is reading, not typing. The tool cannot prevent the request; it undoes it: a guard thread (PyObjC, 3 ms poll, in-process re-activation; falls back to `lsappinfo` + `open -b`) runs from before the navigation until 1.6 s after and puts the user's app back the instant Chrome appears. Until 2026-09-03 the loop was 100 ms polling + `open -b` *after* the call, i.e. a visible 100–400 ms blink twice per page — that was the "takes me there and back" the user reported. The closing lines are measurements: how many times Chrome came forward and for how long, plus "(focus left where it was)"; anything else is a bug report, and a `guard` line goes to `~/.claude/chrome-tab-focus.log` whenever Chrome came forward at all. A path with *no* request would need a Chrome extension (extensions add background tabs to a chosen window natively); not built.
+- Regression check without a human at the keyboard: `scripts/focus-regression.py` waits until the user has been idle 4 min, then runs the raw navigations and the real tool on every path (needs PyObjC and Slack; aborts the moment the idle clock drops). It still needs the user's fresh consent to run — see the `ask-before-taking-the-screen` rule.
 - Reuse searches only the target window; a copy dragged to another window won't refresh.

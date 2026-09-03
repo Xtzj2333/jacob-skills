@@ -12,11 +12,15 @@ Why this exists
   3. the tab carries no marker saying which Claude session opened it.
 
 This tool instead drives Chrome's AppleScript interface, which can add a tab to
-a *specific* window by id without calling `activate`. Chrome still raises itself
-when a tab's URL is set — twice, the second time ~0.4 s later (measured
-2026-08-20) — so the tool watches the front app for a moment afterwards and puts
-the user's app and Chrome's window order back each time. Net effect: a blink at
-most, no steal, and the target window is not left raised inside Chrome.
+a *specific* window by id without calling `activate`. Chrome can still raise
+itself when a tab's URL is set (measured 2026-08-20 with Slack in front: twice,
+the second time ~0.4 s later; measured 2026-09-03 with Terminal in front: not at
+all), so a guard thread watches the frontmost app from *before* the navigation
+until 1.6 s after it and puts the user's app back within milliseconds each time
+Chrome takes it. The rule is: nothing the user is looking at changes — not
+their app, not Chrome's window order, not the active tab of a window they have
+in front, not whether a window is minimized. A new page opens in the
+background; it is there when the user looks.
 
 Windows are addressed by their **given name** — the label you set with
 Chrome's right-click-the-tab-strip > "Name window…". Chrome exposes that as a
@@ -52,6 +56,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -62,6 +68,8 @@ STATE_DIR = Path.home() / ".claude" / "chrome-sessions"
 SESSION_ID = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get(
     "CLAUDE_SESSION_ID"
 ) or "no-session"
+
+CHROME_BID = "com.google.Chrome"
 
 
 # ----------------------------------------------------------------- AppleScript
@@ -184,37 +192,168 @@ def resolve_window(selector, windows=None):
 
 # ------------------------------------------------------------------ focus care
 
+# PyObjC (ships with Anaconda/Homebrew Python, not with Apple's) gives instant
+# front-app reads and an in-process re-activation call. Without it the guard
+# below falls back to `lsappinfo` + `open -b`, which works but is ~30× slower
+# to notice and ~10× slower to put things back. Imported lazily: it costs a few
+# hundred ms and `chrome-tab list` doesn't need it.
+_APPKIT = None
+
+
+def _appkit():
+    global _APPKIT
+    if _APPKIT is None:
+        try:
+            import AppKit  # type: ignore
+            import objc  # type: ignore
+            _APPKIT = (AppKit, objc)
+        except Exception:
+            _APPKIT = False
+    return _APPKIT
+
 
 def front_app():
-    """(name, bundleid) of the frontmost app, without needing Accessibility."""
+    """(name, bundleid, pid) of the frontmost app, without needing Accessibility."""
+    ak = _appkit()
+    if ak:
+        try:
+            a = ak[0].NSWorkspace.sharedWorkspace().frontmostApplication()
+            if a is not None:
+                return (str(a.localizedName()), str(a.bundleIdentifier() or ""),
+                        int(a.processIdentifier()))
+        except Exception:
+            pass
     try:
         asn = subprocess.run(
             ["lsappinfo", "front"], capture_output=True, text=True
         ).stdout.strip()
         if not asn:
-            return (None, None)
+            return (None, None, None)
         info = subprocess.run(
-            ["lsappinfo", "info", "-only", "name,bundleid", asn],
+            ["lsappinfo", "info", "-only", "name,bundleid,pid", asn],
             capture_output=True,
             text=True,
         ).stdout
         name = re.search(r'"LSDisplayName"="([^"]*)"', info)
         bid = re.search(r'"CFBundleIdentifier"="([^"]*)"', info)
-        return (name.group(1) if name else None, bid.group(1) if bid else None)
+        pid = re.search(r'"?pid"?\s*=\s*(\d+)', info)
+        return (name.group(1) if name else None, bid.group(1) if bid else None,
+                int(pid.group(1)) if pid else None)
     except Exception:
-        return (None, None)
+        return (None, None, None)
 
 
-def restore_app(name, bundleid):
-    """Bring a previously-frontmost app back, best effort."""
-    if not name and not bundleid:
-        return
-    if name == "Google Chrome":
-        return
-    if bundleid:
-        subprocess.run(["open", "-b", bundleid], capture_output=True)
-    elif name:
-        subprocess.run(["open", "-a", name], capture_output=True)
+class FocusGuard:
+    """Keep the user's app in front while Chrome is told to navigate.
+
+    Chrome's AppleScript `set URL` can activate Chrome — measured 2026-08-20
+    (Slack in front, user idle): immediately, and again ~0.4 s later when the
+    navigation commits. Start the guard *before* the navigation call. It polls
+    the frontmost app on a thread and, the moment Chrome shows up there, puts
+    the user's app back: with PyObjC that is a ~3 ms poll and an in-process
+    `activateWithOptions:`; the fallback polls `lsappinfo` every 50 ms and
+    runs `open -b`. If the AppKit request is not honoured (macOS 14+ can decline
+    activation requests from bystanders) the guard notices within 250 ms and
+    switches to `open -b` for the rest of the run.
+
+    Call `done()` after the last navigation; the guard keeps watching for
+    `tail` seconds more and then reports every interval Chrome was in front
+    (`spans`). The tail exists for the delayed second activation; 1.6 s covers
+    the measured 0.4 s with margin. When the user is already in Chrome there is
+    nothing to guard at the app level — window order is the caller's job.
+    """
+
+    def __init__(self, enabled=True, tail=1.6):
+        self.name, self.bid, self.pid = front_app()
+        self.tail = tail
+        self.enabled = (enabled and bool(self.bid) and self.bid != CHROME_BID
+                        and self.bid != "com.apple.loginwindow")
+        self.spans = []
+        self._app = None
+        self.method = "open"
+        ak = _appkit()
+        if ak and self.pid:
+            try:
+                self._app = ak[0].NSRunningApplication.runningApplicationWithProcessIdentifier_(
+                    self.pid)
+                if self._app is not None:
+                    self.method = "activate"
+            except Exception:
+                self._app = None
+        self._stop_at = None
+        self._thread = None
+
+    def __enter__(self):
+        if self.enabled:
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+        return self
+
+    def done(self, tail=None):
+        """The last navigation call has returned; watch `tail` more seconds."""
+        self._stop_at = time.monotonic() + (self.tail if tail is None else tail)
+
+    def __exit__(self, *exc):
+        if self._stop_at is None:
+            self.done()
+        if self._thread:
+            self._thread.join(timeout=self.tail + 3)
+
+    def _restore(self):
+        if self.method == "activate":
+            try:
+                ak = _appkit()
+                self._app.activateWithOptions_(ak[0].NSApplicationActivateIgnoringOtherApps)
+                return
+            except Exception:
+                self.method = "open"
+        subprocess.Popen(["open", "-b", self.bid],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _run(self):
+        ak = _appkit()
+        if ak:
+            try:
+                with ak[1].autorelease_pool():
+                    self._loop(0.003)
+                return
+            except Exception:
+                pass
+        self._loop(0.05)
+
+    def _loop(self, step):
+        t0 = time.monotonic()
+        since = None
+        last_fix = 0.0
+        while True:
+            now = time.monotonic()
+            if front_app()[1] == CHROME_BID:
+                if since is None:
+                    since = now
+                if now - last_fix > 0.04:
+                    if self.method == "activate" and now - since > 0.25:
+                        self.method = "open"      # the polite request is being ignored
+                    self._restore()
+                    last_fix = now
+            elif since is not None:
+                self.spans.append((since - t0, now - t0))
+                since = None
+            if self._stop_at is not None and now >= self._stop_at:
+                break
+            time.sleep(step)
+        if since is not None:
+            self.spans.append((since - t0, time.monotonic() - t0))
+
+    def describe(self):
+        """One line for the report: what Chrome did and what the guard did about it."""
+        if not self.enabled:
+            return None
+        if not self.spans:
+            return "Chrome never came forward"
+        ms = ", ".join(f"{(b - a) * 1000:.0f} ms" for a, b in self.spans)
+        how = "AppKit activate" if self.method == "activate" else "open -b"
+        return (f"Chrome came forward {len(self.spans)}× (for {ms}); "
+                f"put you back each time via {how}")
 
 
 # ------------------------------------------------------------------- tab logic
@@ -312,6 +451,26 @@ on run argv
 end run
 """
 
+# Switching the active tab of a window is silent (no activation, no raise), so
+# this is how a new tab is put *behind* the one the user is reading.
+SELECT_TAB_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  set tabIdx to (item 2 of argv) as integer
+  tell application "Google Chrome"
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        if tabIdx is greater than or equal to 1 and tabIdx is less than or equal to (count of tabs of ww) then
+          set active tab index of ww to tabIdx
+        end if
+        return "ok"
+      end if
+    end repeat
+    return "ERR:nowindow"
+  end tell
+end run
+"""
+
 NAME_SCRIPT = """
 on run argv
   set winID to item 1 of argv
@@ -343,9 +502,9 @@ on run argv
 end run
 """
 
-# Creating a window unavoidably raises it. This puts the window the user was
-# actually looking at back on top *without* calling activate — verified to work
-# on Chrome/macOS 2026-08-15.
+# Setting a tab's URL makes Chrome show that window, which raises it inside
+# Chrome. This puts the window the user was actually looking at back on top
+# *without* calling activate — verified to work on Chrome/macOS 2026-08-15.
 RAISE_SCRIPT = """
 on run argv
   set winID to item 1 of argv
@@ -353,6 +512,31 @@ on run argv
     repeat with ww in windows
       if (id of ww as text) is winID then
         set index of ww to 1
+        return "ok"
+      end if
+    end repeat
+    return "gone"
+  end tell
+end run
+"""
+
+FRONT_WIN_SCRIPT = """
+tell application "Google Chrome"
+  if (count of windows) is 0 then return ""
+  return (id of front window) as text
+end tell
+"""
+
+# The same show-the-window step de-minimizes a minimized target (measured
+# 2026-09-03: `minimized` went true → false on a tab add). Put it back so the
+# user's arrangement is as they left it.
+MINIMIZE_SCRIPT = """
+on run argv
+  set winID to item 1 of argv
+  tell application "Google Chrome"
+    repeat with ww in windows
+      if (id of ww as text) is winID then
+        set minimized of ww to true
         return "ok"
       end if
     end repeat
@@ -462,83 +646,64 @@ def cmd_whoami(args):
         print(f"window : (unbound) — would use {default_window_name()!r}")
 
 
-def place_tab(win_id, url, win_is_front, chrome_is_front, args):
+def place_tab(win_id, url, looking, args):
     """Put `url` in window `win_id`, reusing an open copy unless the user is reading it.
 
     Returns one of: 'added' | 'reused' | 'added-beside'.
 
-    'added-beside' is the interesting case: the page is already open AND it is
-    the tab the user is looking at this second. Reloading would scroll them back to
-    the top and collapse any <details> he had opened, mid-read. So we leave his
-    copy untouched and put the new render in a tab beside it. (His form answers
-    are never at risk either way — decision-forms-html persists them to
-    localStorage on every keystroke and restores them on load.)
-    """
-    if args.no_reuse:
-        osa(ADD_SCRIPT, win_id, url)
-        return "added"
+    `looking` means the user has this very window in front of them right now
+    (Chrome is the frontmost app and this is its front window). Then nothing
+    they see may change: a new tab goes *behind* the tab they are on, and a
+    reload does not switch tabs. Otherwise the new or reloaded tab is left
+    selected, so it is what they see when they next come to this window.
 
+    'added-beside' is the case where the page is already open AND it is the tab
+    the user is looking at this second. Reloading would scroll them back to the
+    top and collapse any <details> they had opened, mid-read. So their copy is
+    left untouched and the new render goes in a tab beside it — behind, not in
+    front. (Form answers are never at risk either way — decision-forms-html
+    persists them to localStorage on every keystroke and restores them on load.)
+    """
     info = osa(FIND_TAB_SCRIPT, win_id, url)
     if info.startswith("ERR"):
         die(f"could not inspect window ({info})")
     idx_s, active_s = info.split("|")
     idx, active_idx = int(idx_s), int(active_s)
 
-    if idx == 0:                      # not open here yet
+    def add():
         osa(ADD_SCRIPT, win_id, url)
+        if looking and active_idx > 0:
+            osa(SELECT_TAB_SCRIPT, win_id, active_idx)   # keep their tab in front
+
+    if args.no_reuse or idx == 0:     # not open here yet
+        add()
         return "added"
 
-    jacob_is_reading_it = (idx == active_idx) and win_is_front and chrome_is_front
-    if jacob_is_reading_it and not args.force_reload:
-        osa(ADD_SCRIPT, win_id, url)
+    if looking and idx == active_idx and not args.force_reload:
+        add()
         return "added-beside"
 
-    osa(RELOAD_SCRIPT, win_id, str(idx), "0" if args.no_select else "1")
+    select = not args.no_select and not looking
+    osa(RELOAD_SCRIPT, win_id, str(idx), "1" if select else "0")
     return "reused"
 
 
 FOCUS_LOG = Path.home() / ".claude" / "chrome-tab-focus.log"
 
 
-def settle_focus(pre_name, pre_bid, prev_front_win, target_id, window=1.6, step=0.1):
-    """Undo Chrome's self-activation after a URL is set, including the delayed one.
-
-    Polls the frontmost app for `window` seconds; whenever Chrome has taken it
-    (and the user was not in Chrome to begin with), raises the window the user
-    had on top inside Chrome again and brings their app back. Measured: the
-    second activation lands ~0.4 s after the first, and nothing follows it, so
-    1.6 s of watching covers it with margin. Costs up to 1.6 s per `chrome-tab
-    open`, which runs once per render.
-    """
-    import time
-    if not pre_bid or pre_bid == "com.google.Chrome":
-        # User was in Chrome already: there is no app to go back to, but the
-        # window they were looking at can still be put back on top.
-        if prev_front_win and prev_front_win != target_id:
-            osa(RAISE_SCRIPT, prev_front_win)
-        return
-    deadline = time.time() + window
-    fixes = 0
-    while True:
-        if front_app()[1] == "com.google.Chrome":
-            if prev_front_win and prev_front_win != target_id:
-                osa(RAISE_SCRIPT, prev_front_win)
-            restore_app(pre_name, pre_bid)
-            fixes += 1
-        if time.time() >= deadline:
-            break
-        time.sleep(step)
-    return fixes
-
-
 def cmd_open(args):
     urls = [to_url(t) for t in args.targets]
-    # Who is in front before we touch anything. Measured again at the end, so
-    # the closing line is a reading, not a promise.
-    before_name = front_app()[0]
+    # Who is in front before we touch anything — the guard records it, and it is
+    # measured again at the end so the closing line is a reading, not a promise.
+    guard = FocusGuard(enabled=not args.activate)
+    before_name = guard.name
+    chrome_is_front = guard.bid == CHROME_BID
 
     # --- pick the target window -------------------------------------------
     windows = list_windows()
+    # What the user sees on top inside Chrome. Chrome's `front window` can be a
+    # minimized one (observed 2026-09-03), so take the first that isn't.
+    visible_front = next((w["id"] for w in windows if not w["minimized"]), None)
     target = None
     wanted_name = args.window or os.environ.get("CLAUDE_CHROME_WINDOW")
     if not wanted_name:
@@ -555,47 +720,39 @@ def cmd_open(args):
             target = resolve_window(wanted_name, windows)
 
     created = False
-    if target is None:
-        name = wanted_name or default_window_name()
-        # Remember exactly where the user was, at both levels: which app was
-        # frontmost, and which Chrome window was on top inside Chrome.
-        fname, fbid = front_app()
-        prev_chrome_win = windows[0]["id"] if windows else None
-        wid = osa(CREATE_SCRIPT, name, urls[0])
-        if prev_chrome_win and not args.activate:
-            osa(RAISE_SCRIPT, prev_chrome_win)
-        if not args.activate:
-            restore_app(fname, fbid)
-        created = True
-        target = {"id": wid, "given_name": name, "index": 0, "title": "", "tabs": 1,
-                  "minimized": False}
-        urls = urls[1:]
-        if args.bind or not args.window:
-            write_binding(name)
-
-    # --- add the tabs ------------------------------------------------------
-    # Snapshot "where the user's eyes are" BEFORE touching anything.
-    pre_name, pre_bid = front_app()
-    chrome_is_front = pre_name == "Google Chrome"
-    win_is_front = bool(windows) and target["id"] == windows[0]["id"]
-    prev_front_win = windows[0]["id"] if windows else None
-
     results = []
-    for u in urls:
-        results.append((u, place_tab(target["id"], u, win_is_front, chrome_is_front, args)))
+    with guard:
+        if target is None:
+            name = wanted_name or default_window_name()
+            wid = osa(CREATE_SCRIPT, name, urls[0])
+            created = True
+            target = {"id": wid, "given_name": name, "index": 0, "title": "", "tabs": 1,
+                      "minimized": False}
+            urls = urls[1:]
+            if args.bind or not args.window:
+                write_binding(name)
 
-    # Setting a tab's URL by AppleScript raises Chrome — measured 2026-08-20 with
-    # the user idle and Slack in front, every time, for https and file:// alike.
-    # (Creating an empty tab does not; reloading does not; it is the URL set.)
-    # Worse, it does so TWICE: once immediately, and again ~0.4 s later, when
-    # the navigation commits — so a single restore right after the call is
-    # undone before anyone sees it. That is why this path looked clean when it
-    # was "measured" on 15 Aug and why the restore-focus trial's one real catch
-    # (16 Aug 17:40, two tabs added to "FE" 27 s before the turn ended) was
-    # chrome-tab itself, not the extension. Fix: watch the front app for a
-    # moment after placing tabs and put things back each time Chrome grabs it.
-    if not args.activate and any(r in ("added", "added-beside") for _, r in results):
-        settle_focus(pre_name, pre_bid, prev_front_win, target["id"])
+        was_minimized = bool(target.get("minimized"))
+        looking = (chrome_is_front and target["id"] == visible_front
+                   and not was_minimized and not args.activate)
+        for u in urls:
+            results.append((u, place_tab(target["id"], u, looking, args)))
+
+        navigated = created or any(r in ("added", "added-beside") for _, r in results)
+        if navigated and not args.activate:
+            # Showing the window raised it inside Chrome, and de-minimized it if
+            # it was minimized. Put both back before the user can notice.
+            if visible_front and visible_front != target["id"]:
+                osa(RAISE_SCRIPT, visible_front)
+            if was_minimized:
+                osa(MINIMIZE_SCRIPT, target["id"])
+        # Reloads never activate Chrome (measured), so don't make them wait.
+        guard.done(tail=None if navigated else 0)
+
+    # The delayed second show can reorder windows again; check once more.
+    if navigated and not args.activate and visible_front and visible_front != target["id"]:
+        if osa(FRONT_WIN_SCRIPT) != visible_front:
+            osa(RAISE_SCRIPT, visible_front)
 
     if args.bind and args.window:
         write_binding(target["given_name"] or args.window)
@@ -615,14 +772,30 @@ def cmd_open(args):
         if n("reused"):
             bits.append(f"{n('reused')} reloaded in place")
         if n("added-beside"):
-            bits.append(f"{n('added-beside')} opened in a new tab beside the one you're reading")
+            bits.append(f"{n('added-beside')} opened in a new tab behind the one you're reading")
         print(f"✓ {' + '.join(bits) or 'nothing to do'} in Chrome window “{label}”")
         if n("added-beside"):
             print("  (left your open copy untouched — pass --force-reload to override)")
-    if target.get("minimized"):
+        elif looking and n("added"):
+            print("  (opened behind the tab you're reading — it's there when you switch)")
+    if was_minimized:
         print("  note: that window is minimized — the tab is there when you restore it.")
     if not args.activate:
         after_name = front_app()[0]
+        what = guard.describe()
+        if what:
+            print(f"  ({what})")
+        if guard.spans:
+            # Evidence for the record: how often Chrome grabs the front and how
+            # fast it is undone. Kind "guard" so focus-log-report.py doesn't
+            # count it as a steal.
+            try:
+                with FOCUS_LOG.open("a") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  guard  {what} "
+                            f"while opening in “{label}”{' (new window)' if created else ''}; "
+                            f"user was in {before_name}\n")
+            except Exception:
+                pass
         if after_name == before_name or before_name is None:
             print("  (focus left where it was)")
         else:
@@ -633,7 +806,6 @@ def cmd_open(args):
             print(f"  ⚠ focus moved from {before_name} to {after_name} during this call — "
                   "that is a chrome-tab bug; tell Claude")
             try:
-                import time
                 with FOCUS_LOG.open("a") as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  chrome-tab  moved focus "
                             f"{before_name} → {after_name} while opening in “{label}”"
