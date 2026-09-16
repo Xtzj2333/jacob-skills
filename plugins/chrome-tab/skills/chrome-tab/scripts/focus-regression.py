@@ -47,7 +47,7 @@ def front():
 
 
 def idle():
-    out = subprocess.run("ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'",
+    out = subprocess.run("ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1e9); exit}'",
                          shell=True, capture_output=True, text=True).stdout.strip()
     return int(out) if out.isdigit() else -1
 

@@ -46,6 +46,10 @@ Usage
   chrome-tab bind <NAME> | chrome-tab whoami | chrome-tab unbind
       Manage this session's default window.
 
+  chrome-tab doctor [--quiet]
+      Check what otherwise fails silently: a PATH entry left pointing at an old
+      plugin version, PyObjC missing for this python, ~/.local/bin not on PATH.
+
 Resolution order for the target window:
   --window  >  $CLAUDE_CHROME_WINDOW  >  session binding  >  create one.
 """
@@ -70,6 +74,112 @@ SESSION_ID = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get(
 ) or "no-session"
 
 CHROME_BID = "com.google.Chrome"
+
+__version__ = "0.1.3"
+
+# A PATH entry written by install.sh from a plugin cache starts with this line.
+LAUNCHER_MARK = "chrome-tab launcher (written by install.sh)"
+
+
+# ------------------------------------------------- which copy of me is installed?
+#
+# Claude Code installs a plugin into a *versioned* directory,
+# ~/.claude/plugins/cache/<marketplace>/chrome-tab/<version>/, and `claude plugin
+# update` makes a new one next to it. A PATH symlink into the old directory keeps
+# running the old copy while the update reports success — that happened to Tony
+# (2026-09-15): 0.1.2 sat unused for two weeks. install.sh now writes a launcher
+# that resolves the installed copy at run time; the helpers below are that
+# resolution, and `forward_if_stale()` is the same rescue for a PATH entry made
+# the old way.
+
+
+def claude_dir():
+    """Claude Code's config dir (honours CLAUDE_CONFIG_DIR like the CLI does)."""
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+
+
+PLUGIN_REL = Path("skills") / "chrome-tab" / "scripts" / "chrome-tab"
+IN_PLUGIN_CACHE = re.compile(r"/plugins/cache/[^/]+/chrome-tab/[^/]+/")
+
+
+def version_of(path):
+    """The __version__ inside another copy of this script, or None."""
+    try:
+        m = re.search(r'^__version__ = "([^"]+)"', Path(path).read_text(errors="ignore"), re.M)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def _version_dir_key(d):
+    """Sort key for a plugin-cache version directory: dotted numbers, then mtime."""
+    nums = tuple(int(x) for x in d.name.split(".")) if re.fullmatch(r"\d+(\.\d+)*", d.name) else ()
+    try:
+        mtime = d.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (nums, mtime)
+
+
+def installed_copy():
+    """The chrome-tab script of the plugin version Claude Code has installed, or None.
+
+    installed_plugins.json is what `claude plugin list` reads, so it is the source of
+    truth; if it is missing or unreadable, the highest non-orphaned version directory
+    in the cache stands in. None means no plugin copy exists at all — this is a
+    source checkout such as ~/.claude/skills.
+    """
+    try:
+        data = json.loads((claude_dir() / "plugins" / "installed_plugins.json").read_text())
+        plugins = data.get("plugins", data) if isinstance(data, dict) else {}
+        for key, entries in plugins.items():
+            if key.split("@", 1)[0] != "chrome-tab":
+                continue
+            for e in entries if isinstance(entries, list) else [entries]:
+                ip = e.get("installPath") if isinstance(e, dict) else None
+                if ip and (Path(ip) / PLUGIN_REL).exists():
+                    return Path(ip) / PLUGIN_REL
+    except Exception:
+        pass
+    cands = list((claude_dir() / "plugins" / "cache").glob("*/chrome-tab/*/" + PLUGIN_REL.as_posix()))
+    live = [c for c in cands if not (c.parents[3] / ".orphaned_at").exists()]
+    cands = live or cands
+    return max(cands, key=lambda c: _version_dir_key(c.parents[3])) if cands else None
+
+
+def forward_if_stale():
+    """A plugin-cache copy that is not the installed one hands over to the installed one."""
+    if os.environ.get("CHROME_TAB_NO_FORWARD"):
+        return
+    me = Path(__file__).resolve()
+    if not IN_PLUGIN_CACHE.search(me.as_posix()):
+        return                                   # a source checkout is authoritative
+    target = installed_copy()
+    if target is None or target.resolve() == me:
+        return
+    print(f"chrome-tab: this is {version_of(me) or '?'} at {me}, but the installed plugin is "
+          f"{version_of(target) or '?'} — running that instead. The command on your PATH is stale; "
+          f"make it current once with:  sh \"{target.parent / 'install.sh'}\"",
+          file=sys.stderr)
+    os.execve(sys.executable, [sys.executable, str(target), *sys.argv[1:]],
+              dict(os.environ, CHROME_TAB_NO_FORWARD="1"))
+
+
+def pip_hint():
+    """The command that gives *this* interpreter PyObjC (Homebrew's needs the override flag)."""
+    import sysconfig
+    managed = (Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED").exists()
+    flag = " --break-system-packages" if managed else ""
+    return f"{sys.executable} -m pip install --user{flag} pyobjc-framework-Cocoa"
+
+
+def slow_path_note():
+    """One line for `open` when the focus guard had to run without PyObjC, else None."""
+    if _appkit():
+        return None
+    return (f"note: PyObjC is not installed for {sys.executable}, so the focus guard polled "
+            f"every 50 ms with lsappinfo + open -b instead of every 3 ms — a jump can show "
+            f"for a frame or two. Fix:  {pip_hint()}")
 
 
 # ----------------------------------------------------------------- AppleScript
@@ -785,6 +895,9 @@ def cmd_open(args):
         what = guard.describe()
         if what:
             print(f"  ({what})")
+        note = slow_path_note() if guard.enabled else None
+        if note:
+            print(f"  {note}  (chrome-tab doctor lists everything like this)")
         if guard.spans:
             # Evidence for the record: how often Chrome grabs the front and how
             # fast it is undone. Kind "guard" so focus-log-report.py doesn't
@@ -817,22 +930,120 @@ def cmd_open(args):
 # ----------------------------------------------------------------------- main
 
 
+def chrome_installed():
+    return os.path.isdir("/Applications/Google Chrome.app") or os.path.isdir(
+        os.path.expanduser("~/Applications/Google Chrome.app"))
+
+
 def require_macos_chrome():
     """This tool drives Chrome through AppleScript, which exists only on macOS."""
     if sys.platform != "darwin":
         die("chrome-tab requires macOS — it drives Chrome via AppleScript (osascript).")
-    if not os.path.isdir("/Applications/Google Chrome.app") and not os.path.isdir(
-        os.path.expanduser("~/Applications/Google Chrome.app")
-    ):
+    if not chrome_installed():
         die("Google Chrome not found in /Applications (or ~/Applications).")
 
 
+def cmd_doctor(args):
+    """Report the things that otherwise fail silently, each with its fix.
+
+    Exit 0 when everything is in order, 1 when any line is marked ✗ — so install.sh
+    can end with it and a hook could run it with --quiet.
+    """
+    import platform
+    import shutil
+
+    me = Path(__file__).resolve()
+    installer = me.parent / "install.sh"
+    fix_path = f'sh "{installer}"'
+    lines = []
+    problems = 0
+
+    def ok(label, text):
+        lines.append(f"  {label:<10} {text}")
+
+    def bad(label, text):
+        nonlocal problems
+        problems += 1
+        lines.append(f"✗ {label:<10} {text}")
+
+    ok("running", f"{me}  ({__version__})")
+
+    inst = installed_copy()
+    if inst is None:
+        ok("installed", "no plugin copy on this Mac — this is a source checkout")
+    elif inst.resolve() == me:
+        ok("installed", "this file is the installed plugin copy (installed_plugins.json)")
+    else:
+        ok("installed", f"plugin copy {inst}  ({version_of(inst) or '?'}); you are running "
+                        f"a source checkout, which wins")
+
+    bindir = Path.home() / ".local" / "bin"
+    entry = bindir / "chrome-tab"
+    if not (entry.exists() or entry.is_symlink()):
+        bad("command", f"{entry} does not exist — install it:  {fix_path}")
+    else:
+        try:
+            head = entry.read_text(errors="ignore")[:400]
+        except Exception:
+            head = ""
+        if LAUNCHER_MARK in head:
+            ok("command", f"{entry} is a launcher — it runs the installed plugin copy, so "
+                          f"`claude plugin update` is enough; never re-run install.sh")
+        else:
+            real = entry.resolve()
+            if real == me or (inst is not None and real == inst.resolve()):
+                ok("command", f"{entry} → {real}")
+            elif version_of(real) == __version__:
+                ok("command", f"{entry} → {real}  (another {__version__} copy)")
+            else:
+                bad("command", f"{entry} → {real}  ({version_of(real) or '?'}) is STALE — "
+                               f"this copy is {__version__}. Fix:  {fix_path}")
+    found = shutil.which("chrome-tab")
+    if found and Path(found).resolve() != entry.resolve() and Path(found) != entry:
+        bad("shadowed", f"PATH finds {found} before {entry} — remove or reorder")
+
+    on_path = str(bindir) in os.environ.get("PATH", "").split(":")
+    if on_path:
+        ok("PATH", f"{bindir} is on PATH")
+    else:
+        bad("PATH", f"{bindir} is not on PATH — add to ~/.zshenv:  "
+                    f"export PATH=\"$HOME/.local/bin:$PATH\"")
+
+    pyv = platform.python_version()
+    if _appkit():
+        ok("python", f"{sys.executable} {pyv} — PyObjC present (focus guard polls every 3 ms)")
+    else:
+        bad("python", f"{sys.executable} {pyv} — PyObjC missing: the focus guard falls back to "
+                      f"50 ms polls + `open -b`, so a jump can show for a frame or two. "
+                      f"Fix:  {pip_hint()}")
+
+    if sys.platform != "darwin":
+        bad("macOS", "not macOS — chrome-tab drives Chrome via AppleScript")
+    elif not chrome_installed():
+        bad("Chrome", "Google Chrome not found in /Applications or ~/Applications")
+    else:
+        ok("Chrome", "Google Chrome found")
+
+    if not args.quiet:
+        print(f"chrome-tab doctor ({__version__})")
+        print("\n".join(lines))
+    elif problems:
+        print("\n".join(l for l in lines if l.startswith("✗")))
+    if problems:
+        if not args.quiet:
+            print(f"{problems} thing(s) to fix.")
+        sys.exit(1)
+    if not args.quiet:
+        print("All good.")
+
+
 def main():
-    require_macos_chrome()
+    forward_if_stale()
     p = argparse.ArgumentParser(
         prog="chrome-tab",
         description="Open pages in a chosen Chrome window without stealing focus.",
     )
+    p.add_argument("--version", action="version", version=f"chrome-tab {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pl = sub.add_parser("list", help="list Chrome windows by name")
@@ -866,7 +1077,13 @@ def main():
         func=cmd_whoami
     )
 
+    pd = sub.add_parser("doctor", help="check what fails silently: stale PATH entry, PyObjC, PATH")
+    pd.add_argument("--quiet", action="store_true", help="print only what needs fixing")
+    pd.set_defaults(func=cmd_doctor)
+
     args = p.parse_args()
+    if args.cmd != "doctor":
+        require_macos_chrome()
     args.func(args)
 
 

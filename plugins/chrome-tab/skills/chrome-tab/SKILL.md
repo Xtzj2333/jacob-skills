@@ -12,9 +12,31 @@ description: Use when opening an HTML file or URL in Chrome for the user on macO
 ## Install
 
 ```bash
-sh scripts/install.sh          # symlink onto PATH; --hook also installs the guard
+sh scripts/install.sh          # puts chrome-tab on PATH; --hook also installs the guard
+chrome-tab doctor              # everything that fails silently, each with its fix
 chrome-tab list                # confirm it works
 ```
+
+**From the plugin** (`/plugin install chrome-tab@jacob-skills`), run the installer once from the
+newest cached copy — the glob can match two version directories after an update, and `sh` would
+run the first, so pick the highest:
+
+```bash
+sh "$(ls ~/.claude/plugins/cache/*/chrome-tab/*/skills/chrome-tab/scripts/install.sh | sort -V | tail -1)"
+```
+
+From a plugin cache the installer writes a *launcher*, not a symlink: it runs whichever copy
+Claude Code has installed (`installed_plugins.json`), so after this one run
+`claude plugin update chrome-tab@jacob-skills` is all a later update needs. Before 0.1.3 the PATH
+entry was a symlink into the versioned cache directory, so an update reported success while the
+old copy kept running (Tony, Sep 2026: 0.1.2 sat unused for two weeks). `chrome-tab doctor`
+reports that state as STALE, and a stale copy hands over to the installed one by itself.
+
+**PyObjC** makes the focus guard fast — 3 ms polls and an in-process re-activation. It ships
+with Anaconda's python, not with Apple's or Homebrew's; without it the guard still works but
+polls every 50 ms via `lsappinfo` + `open -b`, so a jump can show for a frame or two. `doctor`
+prints the exact `pip install` line for whichever `python3` runs the tool (Homebrew's needs
+`--break-system-packages`), and `open` says so on every run that took the slow path.
 
 ## Use
 
@@ -25,7 +47,7 @@ chrome-tab open report.html --activate            # ...and bring Chrome forward
 chrome-tab name "#3" "mail archive"               # label an unnamed window
 ```
 
-Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--no-reuse`, `--force-reload`, `--no-select`).
+Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--no-reuse`, `--force-reload`, `--no-select`, `--version`).
 
 ## The two conventions that matter
 
