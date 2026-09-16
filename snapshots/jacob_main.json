@@ -1,8 +1,8 @@
 {
-  "snapshot_version": "0.8.0",
+  "snapshot_version": "0.8.1",
   "owner": "jacob",
   "machine_id": "main",
-  "generated_at": "2026-09-16T06:36:40Z",
+  "generated_at": "2026-09-16T17:23:07Z",
   "platform": "darwin",
   "claude_version": "2.1.273 (Claude Code)",
   "environment": {
@@ -1236,6 +1236,11 @@
         "published_via": "cowork-only"
       },
       {
+        "name": "docs",
+        "description": "docs (living docs people share, comment on and edit; use only when the user asks for one: names a doc, document, page, memo, spec, PRD, runbook or write-up, asks for somewhere to share or keep editing something, or says yes to your doc offer; a plan, comparison, summary or notes asked in chat stays ",
+        "published_via": "cowork-only"
+      },
+      {
         "name": "docx",
         "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx) or Word templates (.dotx). Triggers include: any mention of 'Word doc', 'word document', '.docx', '.dotx', or requests to produce professional documents with formatting like tables of contents, page nu",
         "published_via": "anthropic-builtin"
@@ -1504,7 +1509,7 @@
       }
     },
     "external_clis": {
-      "captured_at": "2026-09-16T06:36:40Z",
+      "captured_at": "2026-09-16T17:23:06Z",
       "uv_tool_list": "\u001b[1mmcp-youtube-transcript v0.3.5\u001b[0m\n- mcp-youtube-transcript\n",
       "brew_leaves": "biber\ncoreutils\nffmpeg\ngh\ngit\ngit-lfs\nlibrsvg\nmosh\nnode\npandoc\nperl\npoppler\npython@3.11\nrclone\nwdiff\n",
       "notes": []
@@ -1579,10 +1584,15 @@
           "keep_alive": true,
           "run_at_load": true,
           "working_dir": "${HOME}/Claude/Mac Mini Hub/slack-event-bridge (claude)",
-          "code": "https://github.com/Xtzj2333/slack-event-bridge (private)",
+          "code": {
+            "remote": "https://github.com/Xtzj2333/slack-event-bridge.git",
+            "head": "12fa5c5",
+            "branch": "main"
+          },
           "what": "Turns Slack channels into persistent Claude Code sessions: a message is pushed over Socket Mode, handed to `claude -p --resume <that channel's session>`, and answered in the thread. Attachments are downloaded and passed as local paths; long replies arrive as a chunk plus the full text as a file; the session auto-compacts.",
+          "repo": "https://github.com/Xtzj2333/slack-event-bridge (private) — the snapshot's auto-discovered `code` field carries the exact commit running",
           "restore_runbook": "RESTORE.md in that repo — the eleven pieces a working bridge needs and which of them survive losing the machine",
-          "config": "~/.config/slack-event-bridge/config.json (chmod 600, deliberately outside the checkout so no git operation can delete it). Backed up to deployments/<machine>/config.json in the code repo by deployments/backup-config.sh — re-run after any config change.",
+          "config": "~/.config/slack-event-bridge/config.json (chmod 600, deliberately outside the checkout so no git operation can delete it). Backed up to deployments/<machine>/config.json in the code repo by deployments/backup-config.sh. Policy (Jacob, 2026-09-16): MANUAL — any session that changes the live config runs the script and commits + pushes the backup in the same turn.",
           "logins_and_keys": "~/.config/slack-event-bridge/tokens.env (chmod 600): a bot token and an app token, both re-issuable from the Slack app at api.slack.com. Never in any repo, never in this snapshot.",
           "depends_on": [
             "Claude Code signed in INTERACTIVELY at the machine (the OAuth lives in the macOS keychain; an SSH session can't reach it and `claude setup-token` strips the claude.ai connectors)",

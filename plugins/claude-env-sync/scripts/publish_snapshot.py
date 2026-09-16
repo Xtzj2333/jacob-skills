@@ -80,7 +80,7 @@ from pathlib import Path
 # plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
 # both whenever the publisher gains or changes a capture. The comparer reads
 # this back and warns if its own SCRIPT_VERSION is older.
-SNAPSHOT_FORMAT_VERSION = "0.8.0"
+SNAPSHOT_FORMAT_VERSION = "0.8.1"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
 SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
@@ -806,6 +806,9 @@ def git_origin(path: Path) -> dict | None:
             {"remote": remote, "head": head, "branch": branch}.items() if v}
 
 
+DISCOVERED_KEYS = {"kind", "plist", "argv", "keep_alive", "run_at_load", "working_dir", "code"}
+
+
 def capture_services(home: Path, stats: dict) -> dict:
     """Background services on this machine that depend on Claude Code.
 
@@ -853,7 +856,14 @@ def capture_services(home: Path, stats: dict) -> dict:
         if not isinstance(extra, dict):
             continue
         entry = claude_adjacent.setdefault(label, {"kind": "declared-only"})
-        entry.update({k: v for k, v in extra.items() if k not in ("argv", "plist")})
+        # What the OS reports wins over what a human wrote: a hand-edited file
+        # goes stale, a plist and a git HEAD don't. Declared keys only ADD.
+        for k, v in extra.items():
+            if k in DISCOVERED_KEYS and k in entry:
+                stats.setdefault("service_keys_shadowed", 0)
+                stats["service_keys_shadowed"] += 1
+                continue
+            entry[k] = v
         entry["declared"] = True
 
     return {
