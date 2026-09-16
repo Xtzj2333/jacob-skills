@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-15 — `chrome-tab` 0.1.3: updates take effect by themselves; `chrome-tab doctor`; PyObjC no longer degrades silently
+
+**TL;DR for anyone on the plugin:** `claude plugin update chrome-tab@jacob-skills`, then start a new session — nothing else. The plugin's new SessionStart check replaces the old version-pinned symlink in `~/.local/bin` with a launcher that always runs the installed copy, and prints whatever `chrome-tab doctor` finds (PyObjC missing, PATH). If you would rather not wait for a session start:
+
+```
+sh "$(ls ~/.claude/plugins/cache/*/chrome-tab/*/skills/chrome-tab/scripts/install.sh | sort -V | tail -1)"
+```
+
+### What was wrong
+
+`install.sh` symlinked `~/.local/bin/chrome-tab` into the plugin cache's *versioned* directory (`…/chrome-tab/0.1.1/…`). An update creates a new directory beside it, so the symlink kept running the old copy while `/plugin update` reported success — Tony ran 0.1.1 for two weeks after 0.1.2 shipped (2026-09-15). The 2026-09-03 entry's re-run line also used a path shape (`cache/jacob-skills/*/plugins/chrome-tab/…`) that does not match the per-plugin cache layout (`cache/jacob-skills/chrome-tab/<version>/…`); the line above is the corrected one, and it picks the newest copy when two versions are cached (a bare glob hands `sh` the oldest).
+
+PyObjC (`pyobjc-framework-Cocoa`) is what lets the focus guard poll every 3 ms and re-activate your app in-process. It ships with Anaconda's python, not with Apple's or Homebrew's. Without it the guard still works, on a 50 ms `lsappinfo` + `open -b` path where a jump can show for a frame or two — and nothing said so.
+
+### What 0.1.3 does
+
+- **Launcher instead of symlink** when installed from a plugin cache: it runs the copy in `installed_plugins.json` (then the highest non-orphaned cached version, then the copy it was installed from). A source checkout keeps its plain symlink, so edits there stay live.
+- **`chrome-tab doctor [--quiet]`** — stale or missing PATH entry, another `chrome-tab` shadowing it, `~/.local/bin` on PATH, PyObjC for the python that actually runs the tool with the exact `pip install` line (`--break-system-packages` added when that python is externally managed, i.e. Homebrew's), macOS/Chrome. Exit 1 when anything is marked ✗. `install.sh` ends with it.
+- A cached copy that is not the installed one **hands over to the installed one** and says so on stderr — the rescue for PATH entries made the old way.
+- `open` prints one line whenever the guard ran without PyObjC.
+- **SessionStart hook** (`scripts/session-check.sh`, registered by the plugin's `hooks/hooks.json`): fixes the PATH entry if it is missing or pinned into a cache directory, never touches a symlink that points at a source checkout, then prints `doctor --quiet`. Silent when there is nothing to say.
+- `chrome-tab --version`.
+- `scripts/test-pickup.py`: 11 tests against a throwaway `$HOME` (they never touch `~/.claude`).
+
 ## 2026-09-03 — `chrome-tab` 0.1.2: the blink is gone (re-run `install.sh`); `chat-substitute-html` 0.3.0 trimmed
 
 **TL;DR for anyone on `chrome-tab` 0.1.0 or 0.1.1:** opening a page could pull Chrome in front of you and shove you back 100–400 ms later, *twice per page*. That was the tool's own design, not a Chrome bug, and 0.1.2 fixes it. Update and re-run the installer:

@@ -321,14 +321,15 @@ One command for a routine push, with the right `cd` / branch / staging done for 
 
 **Platform.** macOS + Google Chrome only. It drives Chrome's AppleScript interface; it exits with a clear message anywhere else.
 
-**Extra install step.** Unlike every other skill here, this one ships an executable. After `/plugin install chrome-tab@jacob-skills`, run its installer once to put the command on your PATH:
+**Extra install step — once.** Unlike every other skill here, this one ships an executable. After `/plugin install chrome-tab@jacob-skills`, start a new session: the plugin's SessionStart check puts a launcher at `~/.local/bin/chrome-tab` by itself and prints anything `chrome-tab doctor` finds. Or do it by hand (the `sort -V` picks the newest cached copy when two versions are present):
 
 ```
-sh ~/.claude/plugins/cache/jacob-skills/*/plugins/chrome-tab/skills/chrome-tab/scripts/install.sh
+sh "$(ls ~/.claude/plugins/cache/*/chrome-tab/*/skills/chrome-tab/scripts/install.sh | sort -V | tail -1)"
+chrome-tab doctor
 chrome-tab list
 ```
 
-Re-run that `install.sh` line after every `claude plugin update chrome-tab@jacob-skills`: the command on your PATH is a symlink into the *versioned* plugin cache, so an update leaves it pointing at the old copy until you do.
+The launcher runs whichever copy Claude Code has installed, so `claude plugin update chrome-tab@jacob-skills` is all a later update needs (before 0.1.3 the PATH entry was a symlink into the versioned cache directory and went stale on every update). **PyObjC** makes the focus guard fast; `doctor` prints the exact `pip install` line for your python if it is missing.
 
 **The problem it solves.** `open report.html` has three faults: macOS hands the file to whichever Chrome window was used *last* (so a report lands in an unrelated window), it pulls Chrome in front of whatever you were doing, and the tab carries no marker of which session opened it. `open -g` does **not** fix the focus steal — Chrome activates itself regardless (measured, not assumed).
 
