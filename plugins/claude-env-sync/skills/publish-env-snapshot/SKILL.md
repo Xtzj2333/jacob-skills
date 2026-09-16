@@ -15,11 +15,39 @@ User asks to publish, refresh, or update an environment snapshot so a collaborat
 
 ## What the snapshot is
 
-A single JSON file (default name: `<owner>_<machine_id>.json` if a machine_id is set, else `<owner>.json`) containing the user's redacted Claude Code config: settings.json + settings.local.json, merged mcpServers from both `~/.claude.json` and `~/.claude/.mcp.json` (keys redacted), global CLAUDE.md, central reference files (e.g. `~/Claude/manuscript-rules.md`), statusline config, keybindings, agents, list of user-level + plugin-shipped skills, slash commands (including their bodies), and `installed_plugins.json` (version + git SHA pinning for every installed plugin). Lives at `<repo>/snapshots/<filename>` in a public-or-collaborator-readable git repo.
+A single JSON file (default name: `<owner>_<machine_id>.json` if a machine_id is set, else `<owner>.json`) containing the user's redacted Claude Code config: settings.json + settings.local.json, merged mcpServers from both `~/.claude.json` and `~/.claude/.mcp.json` (keys redacted), global CLAUDE.md, central reference files (e.g. `~/Claude/manuscript-rules.md`), statusline config, keybindings, agents, list of user-level + plugin-shipped skills, slash commands (including their bodies), `installed_plugins.json` (version + git SHA pinning for every installed plugin), and `services` — the background services this machine runs on top of Claude Code. Lives at `<repo>/snapshots/<filename>` in a public-or-collaborator-readable git repo.
 
 ## Snapshot format version
 
-This skill produces v0.7 snapshots (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older snapshots gracefully (treats missing fields as empty / falls back to older key names). v0.7 added `skills_cowork`: a visibility-only list of skills found in Cowork's per-session skill directory, each tagged `published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only`. Bodies are NOT captured — collaborators see what exists but personal workflow bodies never leak into the public snapshot.
+This skill produces v0.8 snapshots (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older snapshots gracefully (treats missing fields as empty / falls back to older key names). v0.8 added `services` (see below). v0.7 added `skills_cowork`: a visibility-only list of skills found in Cowork's per-session skill directory, each tagged `published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only`. Bodies are NOT captured — collaborators see what exists but personal workflow bodies never leak into the public snapshot.
+
+## `services` — the part of the environment that isn't inside `~/.claude/`
+
+A snapshot of `~/.claude/` describes how Claude behaves, and says nothing about the
+things built *on top* of Claude: a Slack bridge, a scheduled brief, any daemon that
+shells out to `claude -p`. Those are the pieces someone actually loses when a laptop
+dies, and they were invisible here until v0.8.
+
+`services` fixes the visibility, not the backup — the distinction matters:
+
+- **Auto-discovered** from `~/Library/LaunchAgents/*.plist`: label, argv, working
+  directory, `KeepAlive`/`RunAtLoad`, and the git remote + HEAD when the working
+  directory is a checkout. An agent whose argv, cwd or label mentions Claude gets a
+  full entry; every other user agent is listed by label alone, so vendor updaters
+  stay one line.
+- **Declared** in `~/.config/claude-env-sync/services.json`, merged by label. This is
+  where a human writes what no plist knows: what the service is for, where its config
+  lives and whether that config is backed up, how its credentials are re-issued, what
+  it depends on, how to check it is healthy, and what genuinely cannot be recovered.
+
+**Pointers only.** A service's config and credentials stay where they are — they are
+machine- and account-specific and this file goes to a public repo. Note that the
+redactor blanks any key whose name contains `token`, `secret`, `auth`, `credential`
+or `password`, so a field *describing* where credentials live needs a name that
+avoids those words or it will be redacted into uselessness.
+
+The test of a good entry: someone holding only this snapshot and the repos it names
+can rebuild the service, or knows exactly which file they are missing and who has it.
 
 ## Procedure
 

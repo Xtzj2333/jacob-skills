@@ -2,6 +2,23 @@
 """
 publish_snapshot.py — capture a redacted snapshot of a Claude Code environment.
 
+v0.8 adds (on top of v0.7):
+  - SERVICES: background services on this machine that depend on Claude Code
+    (macOS launchd user agents). The snapshot used to describe everything inside
+    ~/.claude/ and nothing about the daemons built on top of it, so a long-running
+    service — a Slack bridge, a scheduled brief — was invisible to both the
+    collaborator diffing your env and to future-you rebuilding on a new laptop.
+    Auto-discovered: label, argv, working directory, KeepAlive/RunAtLoad, and for
+    a working directory that is a git checkout, its remote and HEAD. Services
+    whose argv or cwd mention Claude are captured in full; every other user agent
+    is listed by label only, so vendor noise (Google, Adobe, …) stays a one-liner.
+    Anything that cannot be derived from a plist — where the service keeps its
+    config, where its restore runbook is, how its secrets are re-issued — comes
+    from an optional, hand-written ~/.config/claude-env-sync/services.json.
+    POINTERS ONLY: this section never carries config values or secrets, so a
+    service's own private data stays wherever it lives. See the note below on
+    what this can and cannot restore.
+
 v0.7 adds (on top of v0.6):
   - Cowork-session skills (~/Library/Application Support/Claude/local-agent-mode-sessions/
     skills-plugin/*/*/skills/<name>/SKILL.md). Visibility-only — names +
@@ -63,7 +80,7 @@ from pathlib import Path
 # plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
 # both whenever the publisher gains or changes a capture. The comparer reads
 # this back and warns if its own SCRIPT_VERSION is older.
-SNAPSHOT_FORMAT_VERSION = "0.7.0"
+SNAPSHOT_FORMAT_VERSION = "0.8.0"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
 SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
@@ -758,6 +775,93 @@ PLUGIN_USER_CONFIG_SKIP_NAMES = {"plugin-root", "state.json", "cache.json"}
 PLUGIN_USER_CONFIG_SKIP_SUFFIXES = (".log", ".lock", ".pid", ".cache", ".tmp")
 
 
+def read_plist(path: Path) -> dict | None:
+    """macOS plists may be XML or binary; plutil normalizes both to JSON."""
+    try:
+        out = subprocess.run(["plutil", "-convert", "json", "-o", "-", str(path)],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode != 0:
+            return None
+        return json.loads(out.stdout)
+    except Exception:
+        return None
+
+
+def git_origin(path: Path) -> dict | None:
+    """Remote + HEAD for a service whose working directory is a checkout, so the
+    snapshot says where the code came from rather than only where it ran."""
+    if not path or not (path / ".git").exists():
+        return None
+    def g(*args):
+        try:
+            r = subprocess.run(["git", "-C", str(path), *args],
+                               capture_output=True, text=True, timeout=10)
+            return r.stdout.strip() if r.returncode == 0 else None
+        except Exception:
+            return None
+    remote, head, branch = g("remote", "get-url", "origin"), g("rev-parse", "--short", "HEAD"), g("rev-parse", "--abbrev-ref", "HEAD")
+    if not remote:
+        return None
+    return {k: v for k, v in
+            {"remote": remote, "head": head, "branch": branch}.items() if v}
+
+
+def capture_services(home: Path, stats: dict) -> dict:
+    """Background services on this machine that depend on Claude Code.
+
+    Two sources, deliberately: what the OS knows (launchd plists — always true,
+    never stale) and what only a human knows (~/.config/claude-env-sync/
+    services.json — config locations, restore runbooks, how secrets are
+    re-issued). The declared half is merged onto the discovered half by label.
+
+    This is a MAP, not a backup: it tells a reader that a service exists, what
+    started it, where its code lives and where to read the restore steps. The
+    service's own config and secrets stay where they are.
+    """
+    agents_dir = home / "Library" / "LaunchAgents"
+    claude_adjacent, other_labels = {}, []
+    if agents_dir.is_dir():
+        for plist in sorted(agents_dir.glob("*.plist")):
+            d = read_plist(plist)
+            if not isinstance(d, dict):
+                other_labels.append(plist.stem)
+                continue
+            label = d.get("Label") or plist.stem
+            argv = d.get("ProgramArguments") or ([d["Program"]] if d.get("Program") else [])
+            argv = [a for a in argv if isinstance(a, str)]
+            cwd = d.get("WorkingDirectory")
+            haystack = " ".join(argv + [cwd or "", label]).lower()
+            if "claude" not in haystack:
+                other_labels.append(label)
+                continue
+            entry = {
+                "kind": "launchd-user-agent",
+                "plist": normalize_home(str(plist), stats),
+                "argv": [normalize_home(a, stats) for a in argv],
+                "keep_alive": bool(d.get("KeepAlive")),
+                "run_at_load": bool(d.get("RunAtLoad")),
+            }
+            if cwd:
+                entry["working_dir"] = normalize_home(cwd, stats)
+                repo = git_origin(Path(cwd))
+                if repo:
+                    entry["code"] = repo
+            claude_adjacent[label] = entry
+
+    declared = read_json_safe(home / ".config" / "claude-env-sync" / "services.json") or {}
+    for label, extra in (declared.get("services") or {}).items():
+        if not isinstance(extra, dict):
+            continue
+        entry = claude_adjacent.setdefault(label, {"kind": "declared-only"})
+        entry.update({k: v for k, v in extra.items() if k not in ("argv", "plist")})
+        entry["declared"] = True
+
+    return {
+        "claude_adjacent": redact_value(claude_adjacent, stats),
+        "other_user_agents": sorted(other_labels),
+    }
+
+
 def capture_plugin_user_configs(home: Path, enabled_plugins: dict, stats: dict) -> dict:
     """
     For each enabled plugin, look for user-customizable config files at
@@ -860,6 +964,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
     commands = list_commands(home / ".claude" / "commands", stats)
     agents = list_agents(home / ".claude" / "agents")
     external_clis = capture_external_cli_inventory()
+    services = capture_services(home, stats)
     plugin_user_configs = capture_plugin_user_configs(
         home, settings_raw.get("enabledPlugins") or {}, stats
     )
@@ -906,6 +1011,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "installed_plugins": installed_plugins,
             "external_clis": external_clis,
             "plugin_user_configs": plugin_user_configs,
+            "services": services,
         },
         "source_paths": {
             "settings_json": "~/.claude/settings.json",
@@ -924,6 +1030,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
             "external_clis": "subprocess `uv tool list` + `brew leaves` — externally-installed CLIs that MCP servers / hooks may shell out to (e.g. mcp-youtube-transcript). Best-effort; null if tool not installed.",
             "plugin_user_configs": "~/.claude/<plugin-name>/{*.json,*.toml,*.yaml,*.yml,*.ini,*.conf} — per-plugin user-customized config files that plugins persist outside of settings.json (e.g. claude-notifications-go/config.json: sounds, suppression timers, webhook setup). Top-level files only; <64KB each; redacted.",
+            "services": "~/Library/LaunchAgents/*.plist (auto-discovered; full entry when argv/cwd/label mention Claude, label only otherwise) merged with ~/.config/claude-env-sync/services.json (hand-written: config locations, restore runbook, how secrets are re-issued). Pointers only — no config values, no secrets.",
             "machine_id": "~/.claude/machine_id (one-line file)",
             "claude_version": "subprocess `claude --version`",
         },
@@ -938,6 +1045,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "Forward-compat fields (agents, keybindings) may be empty if those directories don't exist on this machine.",
             "plugin_user_configs (v0.5+): captures per-plugin user config under ~/.claude/<plugin-name>/. Top-level files only; binary, oversized, or non-config-suffix files are skipped. Comparer surfaces these so a collaborator can mirror your tuning.",
             "skills_cowork (v0.7+): names + descriptions of Cowork-session skills. Bodies are NOT bundled — collaborators see what exists and either /plugin install it (when published_via is a plugin) or ask the owner to publish it via sync-cowork-skill (when published_via is cowork-only). 'anthropic-builtin' entries are noise unless you're comparing two non-Cowork machines.",
+            "services (v0.8+): a MAP of the background services this environment runs, not a backup of them. It answers 'what else is running on this machine that needs Claude?' — with the code repo and the restore runbook for each — so a service is never invisible to a collaborator or to a rebuild. The service's own config and secrets deliberately stay outside: they are machine- and account-specific, and this file is published to a public repo. Each entry should name where they live.",
             "If you spot anything sensitive that wasn't caught, edit this file by hand before committing.",
         ],
     }
