@@ -11,7 +11,7 @@ focus guard just as silently. These tests pin the fix:
     copy at run time (so `claude plugin update` alone is enough afterwards);
   * a copy that is not the installed one forwards to the installed one and says so;
   * `chrome-tab doctor` reports a stale PATH entry and a missing PyObjC, with the fix;
-  * install.sh from a source checkout (Jacob's ~/.claude/skills) still makes a symlink.
+  * install.sh from a source checkout (the author's ~/.claude/skills) still makes a symlink.
 
 Run:  python3 scripts/test-pickup.py      (needs macOS; never touches the real ~/.claude)
 """
@@ -150,7 +150,7 @@ class PickupTests(unittest.TestCase):
         self.assertIn(apple, r.stdout)          # the fix names the interpreter that needs it
 
     def test_install_from_source_checkout_keeps_symlink(self):
-        """Jacob's case: install.sh run from ~/.claude/skills (not a plugin cache) -> plain symlink."""
+        """The author's case: install.sh run from ~/.claude/skills (not a plugin cache) -> plain symlink."""
         src = self.h.home / "skills" / "chrome-tab" / "scripts"
         src.mkdir(parents=True)
         shutil.copy(SCRIPT, src / "chrome-tab")
@@ -212,7 +212,7 @@ class SessionCheckTests(unittest.TestCase):
         self.assertTrue((self.h.bin / "chrome-tab").exists())
 
     def test_leaves_a_source_checkout_symlink_alone(self):
-        """A symlink to ~/.claude/skills (Jacob's) is deliberate; the hook must not replace it."""
+        """A symlink to ~/.claude/skills (a source checkout) is deliberate; the hook must not replace it."""
         src = self.h.home / "skills" / "chrome-tab" / "scripts"
         src.mkdir(parents=True)
         shutil.copy(SCRIPT, src / "chrome-tab")

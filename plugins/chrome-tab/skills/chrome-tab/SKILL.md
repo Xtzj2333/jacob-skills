@@ -7,7 +7,7 @@ description: Use when opening an HTML file or URL in Chrome for the user on macO
 
 `open file.html` has three faults on macOS: it hands the file to whichever Chrome window was used *last*, it pulls Chrome in front of whatever the user was doing, and the tab carries no marker of which session opened it. `open -g` does **not** fix the focus steal — Chrome activates itself regardless (measured).
 
-`chrome-tab` drives Chrome's AppleScript interface instead, which can add a tab to a *named* window without calling `activate`.
+`chrome-tab` drives Chrome's AppleScript interface instead, which can add a tab to a *named* window without calling `activate`. With its optional **helper extension** running, it does the navigating through the extension API instead: tab groups, a real tab move, and no request to raise Chrome at all.
 
 ## Install
 
@@ -41,19 +41,49 @@ prints the exact `pip install` line for whichever `python3` runs the tool (Homeb
 ## Use
 
 ```bash
-chrome-tab list                                   # windows by name, not by opaque id
-chrome-tab open report.html --window "educ"       # place it, quietly
+chrome-tab open report.html                       # the matching tab group, wherever it is; else a new one in the home window
+chrome-tab open report.html --group "mail archive"  # name the topic when the file's folder isn't it
+chrome-tab list                                   # windows by name, with their tab groups
+chrome-tab open report.html --window "educ"       # a window the user keeps or named (rare)
 chrome-tab open report.html --activate            # ...and bring Chrome forward
 chrome-tab name "#3" "mail archive"               # label an unnamed window
+chrome-tab home                                   # show the home window; `home NAME` sets it
+chrome-tab where 940163608                        # which window (and group) holds a tab
+chrome-tab move 940163608 --window "FE"           # move a tab for real (helper only)
 ```
 
-Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--no-reuse`, `--force-reload`, `--no-select`, `--version`).
+Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--color`, `--no-reuse`, `--force-reload`, `--no-select`, `--version`).
 
 ## The two conventions that matter
 
 **Address windows by name, never by numeric id.** Chrome exposes the label set by right-clicking the tab strip → "Name window…" as a read/write `given name` property. `chrome-tab list` shows it. Asking "the `educ` window or the `LLM and Culture` one?" beats quoting `940044950`. Offer to name an unnamed window rather than describing it by its tabs.
 
-**One reused window per project/topic.** The window *is* the grouping. Chrome's coloured tab groups cannot be scripted at all — they are an extension-only API, and the Claude-in-Chrome extension refuses `file://` URLs — so a named window is the only per-session grouping available to local files.
+**Every page lands in a tab group, and the tool picks it (0.4.0).** It takes a topic name — `--group`, else the `--window` name given on this call, else the group this session used before, else the file's project folder (`<project>/reports (claude)/…`), else the current folder — and matches it loosely against the groups in every window: same words ignoring case and punctuation, or every word of the shorter name starting a word of the longer one ("mail archive" → "Mail archive", "Furniture" → "Furnitures"; short names like "FE" only match exactly). A match wins wherever it lives, so a page for "FE4" goes into the FE window's FE4 group. No match: a new group in the home window (default "Claude sessions"; `chrome-tab home NAME` changes it), coloured by name. Claude-in-Chrome's own groups ("Claude", "✅Claude") are never matched or added to. The output says which group and why; when it made a new group it lists the others in that window, and re-running with `--group` moves the page (Chrome drops the emptied group). So: pass `--group` when the file's folder isn't the topic, reusing a name from `chrome-tab list` when one fits; leave `--window` for a window the user keeps or names, and `--new-window` for when they ask for one. Until 0.2.0 an unknown `--window` name made a brand-new window: 76 of them in five weeks on one Mac.
+
+Without the helper there are no groups: the page goes to the window only, and the output says groups were skipped. AppleScript has no tab-group class.
+
+## The helper extension (optional)
+
+```bash
+chrome-tab helper install     # copies it to ~/.claude/chrome-tab-helper, registers its host with Chrome
+chrome-tab helper status      # installed? loaded? answering? — each with its fix
+```
+
+The user loads it once. Open chrome://extensions, switch on Developer mode, click "Load unpacked", and pick `~/.claude/chrome-tab-helper/extension`. Its id is fixed by the `key` in its manifest, so the host registration always matches. From then on Chrome starts a small native-messaging host (`helper/chrome_tab_host.py`) that serves a Unix socket only this user can open. `chrome-tab` asks the extension to open, reuse, group and move tabs.
+
+- **What it changes.** Tabs are added in the background by the extension, with nothing asking macOS to bring Chrome forward. Window names are read from the Chrome that runs the helper, by process id. That means a headless copy of Chrome launched by another job can't answer in its place. Groups and a real `move` become possible. AppleScript's `move` closes the tab and opens a blank one.
+- **What it can't see.** Window names: the extension API has no field for them. `chrome-tab` reads them through Apple events and matches by id, and the ids are the same numbers on both sides.
+- **Without it.** Everything falls back to the AppleScript path above and says what it couldn't do.
+- **Tests.** `scripts/test-helper.py` and `scripts/test-cic-hook.py` run the real extension and host in a throwaway headless Chrome for Testing (set `CHROME_TAB_TEST_BROWSER`). Any browser launched for testing needs `--use-mock-keychain --password-store=basic`, or macOS puts a keychain password dialog in front of the user.
+
+## Claude-in-Chrome tabs beside the session's pages (optional hook)
+
+The Claude-in-Chrome extension puts each session's tab group in whichever window had focus last, and it has no setting for this. `scripts/install-cic-hook.py` (the user runs it; it edits `settings.json`) adds a PostToolUse hook, `chrome-tab hook claude-in-chrome`, on `tabs_context_mcp`, `navigate` and `browser_batch`. When one of those reports a brand-new one-tab session group, the hook has the helper move the whole group **right after the group this session's pages went to** (the session memory `chrome-tab open` writes), else into the browse window, which defaults to the home window (`browse_window` in `~/.config/chrome-tab/config.json` overrides). The browsing group can't merge into the topic group: the extension checks every tool call against its own group. `tabGroups.move` keeps the group's id, so the session keeps working. The hook's guardrails:
+- it moves only a group the tool just reported, holding exactly that one tab, and only once;
+- it never moves an active tab and never creates a window;
+- if the browse window isn't open, the tab stays where it is and the session is told in one line.
+
+Decisions are logged to `~/.claude/chrome-tab-helper/hook.log`.
 
 ## Nothing the user is looking at changes
 
@@ -98,6 +128,6 @@ A `restore-focus.sh` wrapper exits in ~5.7 ms when no snapshot is pending — wo
 ## Limits
 
 - macOS + Google Chrome only; the tool exits with a clear error elsewhere.
-- Setting a tab's URL by AppleScript *asks* macOS to bring Chrome forward — new window or existing one, twice, the second time ~0.4 s later (creating an empty tab and reloading do not). Whether macOS grants it depends on the user: measured 2026-08-20 (user idle 200+ s, Slack in front) it was granted every time; measured 2026-09-03 (user had touched the keyboard 3–20 s earlier) it was never granted, and neither was an `open -b` from the tool. So the flash happens when the user is reading, not typing. The tool cannot prevent the request; it undoes it: a guard thread (PyObjC, 3 ms poll, in-process re-activation; falls back to `lsappinfo` + `open -b`) runs from before the navigation until 1.6 s after and puts the user's app back the instant Chrome appears. Until 2026-09-03 the loop was 100 ms polling + `open -b` *after* the call, i.e. a visible 100–400 ms blink twice per page — that was the "takes me there and back" the user reported. The closing lines are measurements: how many times Chrome came forward and for how long, plus "(focus left where it was)"; anything else is a bug report, and a `guard` line goes to `~/.claude/chrome-tab-focus.log` whenever Chrome came forward at all. A path with *no* request would need a Chrome extension (extensions add background tabs to a chosen window natively); not built.
+- Setting a tab's URL by AppleScript *asks* macOS to bring Chrome forward — new window or existing one, twice, the second time ~0.4 s later (creating an empty tab and reloading do not). Whether macOS grants it depends on the user: measured 2026-08-20 (user idle 200+ s, Slack in front) it was granted every time; measured 2026-09-03 (user had touched the keyboard 3–20 s earlier) it was never granted, and neither was an `open -b` from the tool. So the flash happens when the user is reading, not typing. The tool cannot prevent the request; it undoes it: a guard thread (PyObjC, 3 ms poll, in-process re-activation; falls back to `lsappinfo` + `open -b`) runs from before the navigation until 1.6 s after and puts the user's app back the instant Chrome appears. Until 2026-09-03 the loop was 100 ms polling + `open -b` *after* the call, i.e. a visible 100–400 ms blink twice per page — that was the "takes me there and back" the user reported. The closing lines are measurements: how many times Chrome came forward and for how long, plus "(focus left where it was)"; anything else is a bug report, and a `guard` line goes to `~/.claude/chrome-tab-focus.log` whenever Chrome came forward at all. The helper extension (above) is that path with *no* request: with it running, pages are added by the extension and the guard only measures.
 - Regression check without a human at the keyboard: `scripts/focus-regression.py` waits until the user has been idle 4 min, then runs the raw navigations and the real tool on every path (needs PyObjC and Slack; aborts the moment the idle clock drops). It still needs the user's fresh consent to run — see the `ask-before-taking-the-screen` rule.
 - Reuse searches only the target window; a copy dragged to another window won't refresh.

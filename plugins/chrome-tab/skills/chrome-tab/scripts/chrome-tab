@@ -34,7 +34,8 @@ Usage
 
   chrome-tab open <url-or-path>... [options]
       --window NAME    target the window with this given name
-      --new-window     force a fresh window (named via --window)
+      --group NAME     put it in the tab group NAME in that window (needs the helper)
+      --new-window     make a fresh window (named via --window) — only when asked
       --activate       bring Chrome forward (default: stay out of your way)
       --no-reuse       always add a tab, even if that URL is already open
       --bind           remember this window for the rest of the session
@@ -46,18 +47,49 @@ Usage
   chrome-tab bind <NAME> | chrome-tab whoami | chrome-tab unbind
       Manage this session's default window.
 
+  chrome-tab home [NAME]
+      Show or set the home window (default "Claude sessions").
+
+  chrome-tab helper install|status|uninstall
+      The companion extension. Chrome's AppleScript has no tab groups, can't move a
+      tab without destroying it, and asks macOS to raise Chrome on every navigation;
+      the extension does those things through the extension API instead.
+
+  chrome-tab where <tab-id>  |  chrome-tab move <tab-id> --window NAME
+      Which window holds a tab; move a tab into a named window (needs the helper —
+      AppleScript's move closes the tab and opens a blank one).
+
+  chrome-tab hook claude-in-chrome
+      A PostToolUse hook (scripts/install-cic-hook.py registers it). When a
+      Claude-in-Chrome tool reports a brand-new one-tab session group, it moves that
+      group into the browse window (default "Claude sessions"), once.
+
   chrome-tab doctor [--quiet]
       Check what otherwise fails silently: a PATH entry left pointing at an old
       plugin version, PyObjC missing for this python, ~/.local/bin not on PATH.
 
 Resolution order for the target window:
-  --window  >  $CLAUDE_CHROME_WINDOW  >  session binding  >  create one.
+  --window  >  $CLAUDE_CHROME_WINDOW  >  session binding  >  the home window.
+
+A name that matches no open window does not create one. Until 0.2.0 it did, so every
+session that invented a topic name opened a brand-new window. The page goes to the
+home window instead and the tool says so. Only --new-window creates a window,
+plus the home window itself on the rare run when it isn't open.
+
+With the helper running, every page lands in a tab group (0.4.0). The topic comes from
+--group, else the --window name given on this call, else the group this session used
+before, else the file's project folder, else the current folder. It is matched loosely
+against the groups in every window ("mail archive" → "Mail archive", "Furniture" →
+"Furnitures"); a match wins wherever it lives, otherwise a new group is made in the home
+window. Claude-in-Chrome's own groups ("Claude", "✅Claude") are never matched or added to.
 """
 
 import argparse
 import json
 import os
 import re
+import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -68,14 +100,14 @@ from pathlib import Path
 US = "\x1f"  # unit separator between fields
 RS = "\x1e"  # record separator between windows
 
-STATE_DIR = Path.home() / ".claude" / "chrome-sessions"
+STATE_DIR = Path(os.environ.get("CHROME_TAB_STATE_DIR") or (Path.home() / ".claude" / "chrome-sessions"))
 SESSION_ID = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get(
     "CLAUDE_SESSION_ID"
 ) or "no-session"
 
 CHROME_BID = "com.google.Chrome"
 
-__version__ = "0.1.3"
+__version__ = "0.4.0"
 
 # A PATH entry written by install.sh from a plugin cache starts with this line.
 LAUNCHER_MARK = "chrome-tab launcher (written by install.sh)"
@@ -187,6 +219,9 @@ def slow_path_note():
 
 def osa(script, *args):
     """Run an AppleScript, passing args as argv. Returns stdout stripped."""
+    if os.environ.get("CHROME_TAB_NO_APPLESCRIPT"):
+        # Tests against a throwaway browser set this, so nothing can reach the user's Chrome.
+        die("AppleScript is disabled (CHROME_TAB_NO_APPLESCRIPT is set)")
     proc = subprocess.run(
         ["osascript", "-", *[str(a) for a in args]],
         input=script,
@@ -234,7 +269,44 @@ end run
 """
 
 
-def list_windows():
+# Reading a Chrome addressed by process id. `tell application "Google Chrome"` goes by
+# bundle id, so while another job runs a headless copy of the Chrome app, that copy can
+# answer instead (observed 2026-09-16: 0 windows listed, windows "created" invisibly).
+# The helper's host knows the pid of the Chrome that runs the extension; reads go there.
+JXA_LIST = """
+function run(argv) {
+  const ws = Application(Number(argv[0])).windows;
+  const ids = ws.id(), names = ws.givenName(), mins = ws.minimized(), titles = ws.name();
+  const counts = ws.tabs.id().map(a => a.length);
+  return JSON.stringify(ids.map((id, i) => ({id: String(id), given_name: names[i] || "",
+    minimized: !!mins[i], title: titles[i] || "", tabs: counts[i]})));
+}
+"""
+
+JXA_NAME = """
+function run(argv) {
+  Application(Number(argv[0])).windows.byId(Number(argv[1])).givenName = argv[2];
+  return "ok";
+}
+"""
+
+
+def jxa(script, *args):
+    proc = subprocess.run(["osascript", "-l", "JavaScript", "-", *[str(a) for a in args]],
+                          input=script, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip())
+    return proc.stdout.rstrip("\n")
+
+
+def list_windows(pid=None):
+    """Chrome's windows, front to back. With `pid`, read that Chrome process only."""
+    if pid:
+        try:
+            rows = json.loads(jxa(JXA_LIST, pid))
+            return [dict(r, index=i) for i, r in enumerate(rows, start=1)]
+        except Exception:
+            pass                      # fall through to the bundle-id read
     raw = osa(LIST_SCRIPT)
     out = []
     for i, rec in enumerate([r for r in raw.split(RS) if r.strip()], start=1):
@@ -258,8 +330,13 @@ def list_windows():
 # --------------------------------------------------------------- window lookup
 
 
-def resolve_window(selector, windows=None):
-    """Resolve a human selector to a window dict, or None."""
+def resolve_window(selector, windows=None, titles=True):
+    """Resolve a human selector to a window dict, or None.
+
+    `titles=False` stops before the last-resort match on an unnamed window's active
+    tab title — `open` uses that, so a topic word can't land a page in whatever
+    unnamed window happens to be showing a page with that word in its title.
+    """
     if not selector:
         return None
     windows = windows if windows is not None else list_windows()
@@ -293,6 +370,8 @@ def resolve_window(selector, windows=None):
     for w in windows:
         if w["given_name"] and s.lower() in w["given_name"].lower():
             return w
+    if not titles:
+        return None
     # substring of active tab title (last resort)
     for w in windows:
         if s.lower() in w["title"].lower():
@@ -531,7 +610,8 @@ on run argv
         set ai to active tab index of ww
         set n to count of tabs of ww
         repeat with i from 1 to n
-          if (URL of tab i of ww) is theURL then
+          set u to URL of tab i of ww
+          if u is theURL or u starts with (theURL & "#") then
             return (i as text) & "|" & (ai as text)
           end if
         end repeat
@@ -656,15 +736,96 @@ end run
 """
 
 
+# ------------------------------------------------------------------- helper
+#
+# The companion extension (helper/extension) and its native-messaging host
+# (helper/chrome_tab_host.py). `chrome-tab helper install` copies both to a stable
+# directory, so a branch switch or plugin update can't pull them out from under Chrome,
+# and registers the host with Chrome. The extension is loaded once by hand
+# (chrome://extensions → Developer mode → Load unpacked); Chrome then starts the host,
+# which serves a Unix socket that only this user can open. When the helper isn't
+# running, everything falls back to AppleScript and says what it couldn't do.
+
+HELPER_NAME = "com.jacob_skills.chrome_tab"
+HELPER_EXT_ID = "fjfhflgjjbjjlkbfhjegbnbommoiffie"   # fixed by the "key" in manifest.json
+HELPER_SRC = Path(__file__).resolve().parent.parent / "helper"
+
+
+def helper_dir():
+    return Path(os.environ.get("CHROME_TAB_HELPER_DIR")
+                or (Path.home() / ".claude" / "chrome-tab-helper"))
+
+
+def helper_socket():
+    return Path(os.environ.get("CHROME_TAB_SOCKET") or (helper_dir() / "bridge.sock"))
+
+
+def nmh_dir():
+    return Path(os.environ.get("CHROME_TAB_NMH_DIR") or (
+        Path.home() / "Library" / "Application Support" / "Google" / "Chrome" / "NativeMessagingHosts"))
+
+
+class HelperError(Exception):
+    pass
+
+
+def helper_call(cmd, timeout=8.0, **args):
+    """Ask the helper to do `cmd`. None when it isn't running; HelperError when it refused."""
+    path = helper_socket()
+    if not path.exists():
+        return None
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout + 2)
+    buf = b""
+    try:
+        s.connect(str(path))
+        s.sendall((json.dumps({"cmd": cmd, "args": args, "timeout": timeout}) + "\n").encode())
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    except OSError:
+        return None
+    finally:
+        s.close()
+    if not buf.strip():
+        return None                   # the host went away mid-request (it dies with its Chrome)
+    try:
+        reply = json.loads(buf.decode())
+    except ValueError:
+        return None
+    if not reply.get("ok"):
+        raise HelperError(reply.get("error") or "no reply")
+    return reply.get("result")
+
+
+def helper_host():
+    """The running host's facts (pid, chrome_pid, extension), or None."""
+    try:
+        return helper_call("host", timeout=2)
+    except HelperError:
+        return None
+
+
+def name_window(wid, name, chrome_pid=None):
+    res = osa(NAME_SCRIPT, wid, name)
+    if res.startswith("ERR") and chrome_pid:
+        try:
+            jxa(JXA_NAME, chrome_pid, wid, name)      # the bundle-id route hit another Chrome
+        except Exception:
+            pass
+
+
 # ------------------------------------------------------------ session bindings
 
 
-def binding_file():
-    return STATE_DIR / f"{SESSION_ID}.json"
+def binding_file(session=None):
+    return STATE_DIR / f"{session or SESSION_ID}.json"
 
 
-def read_binding():
-    f = binding_file()
+def read_binding(session=None):
+    f = binding_file(session)
     if f.exists():
         try:
             return json.loads(f.read_text())
@@ -673,30 +834,233 @@ def read_binding():
     return None
 
 
-def write_binding(name):
+def write_binding(name, group=None):
+    """Remember this session's window and tab group (the next open without flags reuses them)."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    binding_file().write_text(
-        json.dumps({"session": SESSION_ID, "window_name": name, "cwd": os.getcwd()}, indent=2)
-    )
+    binding_file().write_text(json.dumps({"session": SESSION_ID, "window_name": name, "group": group,
+                                          "cwd": os.getcwd()}, indent=2))
 
 
-def default_window_name():
-    """A readable per-session window name."""
-    explicit = os.environ.get("CLAUDE_CHROME_WINDOW")
-    if explicit:
-        return explicit
-    cwd = re.sub(r"\s*[\(\[]claude[\)\]]\s*$", "", Path.cwd().name, flags=re.I).strip()
-    if cwd in ("", "/", "Claude"):
-        cwd = "session"
-    return f"Claude · {cwd}"
+# ----------------------------------------------------------------- home window
+#
+# Where a page goes when nobody named a window, or the name matches no open
+# window. One window the user keeps, instead of a new one per topic.
+
+DEFAULT_HOME = "Claude sessions"
+
+
+def config_file():
+    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
+    return Path(base) / "chrome-tab" / "config.json"
+
+
+def read_config():
+    try:
+        data = json.loads(config_file().read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def home_window_name():
+    env = os.environ.get("CHROME_TAB_HOME_WINDOW", "").strip()
+    if env:
+        return env
+    v = read_config().get("home_window")
+    return v.strip() if isinstance(v, str) and v.strip() else DEFAULT_HOME
+
+
+# ------------------------------------------------------------------ tab groups
+#
+# The user's ideal (2026-09-17): every page a session opens goes into the matching tab
+# group if one exists, else into a new, well-named group in the home window; never loose.
+# The tool does the matching so nothing depends on a session remembering a rule.
+
+# Claude-in-Chrome titles its session groups "Claude" (legacy "Claude (MCP)", side panel
+# "⌛/🔔/✅Claude"). Adding a page to one breaks that browsing session, so they never match.
+CIC_GROUP = re.compile(r"^\s*[⌛🔔✅]?\s*Claude(\s*\(MCP\))?\s*$")
+FLAG_SUFFIX = re.compile(r"\s*[\(\[]claude[\)\]]\s*$", re.I)
+GENERIC_FOLDERS = {"", "/", "claude", "reports", "session", "tmp", "scripts", "output"}
+
+
+def norm_words(s):
+    return re.sub(r"[^a-z0-9 ]+", " ", (s or "").lower()).split()
+
+
+def group_score(name, title):
+    """2 = the same name (case and punctuation aside); 1 = a loose match; 0 = no.
+
+    Loose: every word of the shorter name, four letters or more, starts a word of the
+    longer one (or vice versa), so "mail archive" ⇒ "Mail archive", "Furniture" ⇒
+    "Furnitures", "UChicago mail archive" ⇒ "Mail archive", but "Berkeley seminars" never
+    lands in "Berkeley funding" and "FE" only ever matches "FE".
+    """
+    if CIC_GROUP.match(title or "") or CIC_GROUP.match(name or ""):
+        return 0
+    a, b = norm_words(name), norm_words(title)
+    if not a or not b:
+        return 0
+    if a == b:
+        return 2
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if all(len(t) >= 4 and any(len(u) >= 4 and (u.startswith(t) or t.startswith(u)) for u in long_)
+           for t in short):
+        return 1
+    return 0
+
+
+def find_group(topic, ext_windows, prefer=()):
+    """The best existing group for `topic`: (window_id, title, score) or None.
+
+    `ext_windows` is the helper's window list (each with "groups"). Ties go to the windows
+    in `prefer` (ids, in order), then to the first window Chrome lists.
+    """
+    best = None
+    order = {str(w): i for i, w in enumerate(prefer)}
+    for wi, w in enumerate(ext_windows or []):
+        for g in w.get("groups") or []:
+            sc = group_score(topic, g.get("title", ""))
+            if not sc:
+                continue
+            key = (-sc, order.get(str(w["id"]), len(order)), wi)
+            if best is None or key < best[0]:
+                best = (key, (str(w["id"]), g["title"], sc))
+    return best[1] if best else None
+
+
+def project_of(target, home=None):
+    """A topic name from where a file lives, or None for URLs and unhelpful folders.
+
+    `<project>/reports (claude)/x.html` → project; `~/Claude/reports/<topic>/x.html` → topic;
+    otherwise the file's folder, minus a "(claude)" flag.
+    """
+    if not target or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) and not target.startswith("file:"):
+        return None
+    if target.startswith("file://"):
+        target = urllib.parse.unquote(target[7:])
+    p = Path(target).expanduser()
+    try:
+        parts = p.resolve().parts
+    except Exception:
+        return None
+    home = Path(home or Path.home())
+    name = None
+    if "reports (claude)" in parts:
+        i = parts.index("reports (claude)")
+        name = parts[i - 1] if i > 0 else None
+    else:
+        central = (home / "Claude" / "reports").parts
+        if parts[:len(central)] == central and len(parts) > len(central) + 1:
+            name = parts[len(central)]
+        else:
+            name = p.parent.name
+    name = FLAG_SUFFIX.sub("", name or "").strip()
+    return name if name.lower() not in GENERIC_FOLDERS else None
+
+
+def topic_name(explicit, remembered, wanted, fell_back, targets, cwd=None):
+    """(topic, where it came from).
+
+    What the session says on this call (--group, then --window) beats what it used before:
+    a session that names a new topic must not stay stuck in its first group. Memory covers
+    the opens with no hints at all; the file's folder and the current folder come last.
+    """
+    if explicit and explicit.strip():
+        return explicit.strip(), "--group"
+    if wanted and wanted.strip():
+        return wanted.strip(), "the window name you gave" if fell_back else "the window's name"
+    if remembered:
+        return remembered, "this session's earlier group"
+    for t in targets or []:
+        name = project_of(t)
+        if name:
+            return name, "the file's folder"
+    folder = FLAG_SUFFIX.sub("", Path(cwd or os.getcwd()).name).strip()
+    if folder.lower() not in GENERIC_FOLDERS:
+        return folder, "the current folder"
+    return "Claude pages", "the default"
+
+
+def plan_placement(windows, ext, wanted, explicit_group, binding, targets, home,
+                   new_window=False, cwd=None):
+    """Where a page goes, without touching Chrome.
+
+    windows  Chrome's windows (chrome-tab's list, with given names); ext the helper's list
+             (with groups) or None when the helper isn't running.
+    Returns a dict: window (open window or None), create_name (a window to make),
+    topic, topic_source, group (title to use; None without the helper), group_new,
+    fell_back (the --window name matched nothing), followed (a group in another window
+    won), others (group titles already in the chosen window).
+    """
+    binding = binding or {}
+    remembered = binding.get("group")
+    target = None
+    fell_back = False
+    if new_window:
+        target, create_name = None, wanted
+    elif wanted:
+        target = resolve_window(wanted, windows, titles=False)
+        fell_back = target is None
+        create_name = None
+    else:
+        create_name = None
+    # An explicit window that isn't the one the session used before makes the earlier
+    # group irrelevant: "--window FE" after pages in "chrome-tab" means FE, not chrome-tab.
+    if target is not None and remembered and (binding.get("window_name") or "").lower() != \
+            (target.get("given_name") or "").lower():
+        remembered = None
+    topic, source = topic_name(explicit_group, remembered, wanted, fell_back, targets, cwd)
+
+    home_w = next((w for w in windows if w["given_name"].lower() == (home or "").lower()), None)
+    plan = {"topic": topic, "topic_source": source, "fell_back": fell_back, "followed": False,
+            "group": None, "group_new": False, "others": [], "create_name": None, "window": None}
+    if new_window:
+        plan.update(window=None, create_name=create_name, group=topic if ext is not None else None,
+                    group_new=ext is not None)
+        return plan
+    if ext is None:                                   # no helper: window only, no groups
+        plan.update(window=target or home_w, create_name=None if (target or home_w) else home)
+        return plan
+    by_id = {str(w["id"]): w for w in ext}
+    if target is not None:
+        pool = [by_id[target["id"]]] if target["id"] in by_id else []
+    else:
+        pool = ext
+    prefer = [home_w["id"]] if home_w else []
+    prev = next((w["id"] for w in windows
+                 if w["given_name"] and w["given_name"].lower() == (binding.get("window_name") or "").lower()), None)
+    if prev:
+        prefer.append(prev)
+    hit = find_group(topic, pool, prefer)
+    if hit:
+        wid, title, _ = hit
+        win = next((w for w in windows if w["id"] == wid), None)
+        plan.update(window=win, group=title,
+                    followed=(target is None and (home_w is None or wid != home_w["id"])))
+    else:
+        win = target or home_w
+        plan.update(window=win, create_name=None if win else home, group=topic, group_new=True)
+    if plan["window"] is not None:
+        plan["others"] = [g["title"] for g in (by_id.get(plan["window"]["id"], {}).get("groups") or [])
+                          if g["title"] != plan["group"]]
+    return plan
 
 
 # ----------------------------------------------------------------- subcommands
 
 
 def cmd_list(args):
-    windows = list_windows()
+    host = helper_host()
+    windows = list_windows(host.get("chrome_pid") if host else None)
+    ext = {}
+    if host:
+        try:
+            ext = {str(w["id"]): w for w in (helper_call("windows") or [])}
+        except HelperError:
+            ext = {}
     if args.json:
+        for w in windows:
+            w["groups"] = ext.get(w["id"], {}).get("groups") if host else None
         print(json.dumps(windows, indent=2))
         return
     if not windows:
@@ -713,6 +1077,12 @@ def cmd_list(args):
         mini = " [minimized]" if w["minimized"] else ""
         title = w["title"][:46]
         print(f"{w['index']:>2}  {given.ljust(name_w)}  {w['tabs']:>4}  {title}{mini}{mark}")
+        groups = ext.get(w["id"], {}).get("groups") or []
+        if groups:
+            print(f"{'':>2}  {'':{name_w}}        groups: " + ", ".join(
+                f"{g['title'] or '(untitled)'} ({g['tabs']})" for g in groups))
+    if not host:
+        print("\n(tab groups aren't shown: the chrome-tab helper isn't running — chrome-tab helper status)")
     unnamed = [w for w in windows if not w["given_name"]]
     if unnamed:
         print(
@@ -748,12 +1118,426 @@ def cmd_unbind(args):
 def cmd_whoami(args):
     b = read_binding()
     print(f"session: {SESSION_ID}")
+    home = home_window_name()
     if b:
-        w = resolve_window(b["window_name"])
-        state = "exists" if w else "MISSING (will be recreated)"
+        w = resolve_window(b["window_name"], titles=False)
+        state = "exists" if w else f"not open — pages go to the home window “{home}”"
         print(f"window : {b['window_name']}  [{state}]")
+        if b.get("group"):
+            print(f"group  : {b['group']}  (the next open without --group reuses it)")
     else:
-        print(f"window : (unbound) — would use {default_window_name()!r}")
+        print(f"window : (unbound) — pages go to the home window “{home}”")
+
+
+def cmd_home(args):
+    if args.name is None:
+        src = ("$CHROME_TAB_HOME_WINDOW" if os.environ.get("CHROME_TAB_HOME_WINDOW", "").strip()
+               else str(config_file()) if read_config().get("home_window") else "default")
+        print(f"home window: {home_window_name()}  ({src})")
+        return
+    cfg = read_config()
+    cfg["home_window"] = args.name.strip()
+    config_file().parent.mkdir(parents=True, exist_ok=True)
+    config_file().write_text(json.dumps(cfg, indent=2) + "\n")
+    print(f"home window set to “{cfg['home_window']}” ({config_file()})")
+
+
+def helper_manifest_path():
+    return nmh_dir() / f"{HELPER_NAME}.json"
+
+
+LAUNCHER_HEAD = "# chrome-tab helper host launcher (written by chrome-tab helper install)"
+
+
+def helper_install(args):
+    src = HELPER_SRC
+    if not (src / "extension" / "manifest.json").exists() or not (src / "chrome_tab_host.py").exists():
+        die(f"helper sources not found in {src}")
+    d = helper_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    # Chrome loads the extension from here, not from the source checkout, so switching
+    # branches or updating the plugin can't pull files out from under it.
+    staged = d / "extension.new"
+    if staged.exists():
+        shutil.rmtree(staged)
+    shutil.copytree(src / "extension", staged)
+    if (d / "extension").exists():
+        shutil.rmtree(d / "extension")
+    staged.rename(d / "extension")
+    shutil.copy2(src / "chrome_tab_host.py", d / "chrome_tab_host.py")
+    launcher = d / "host"
+    launcher.write_text(
+        "#!/bin/sh\n" + LAUNCHER_HEAD + "\n"
+        "# exec keeps Chrome as the host's parent: that is how it learns which Chrome runs it.\n"
+        f'CHROME_TAB_SOCKET="{helper_socket()}" exec "{sys.executable}" '
+        f'"{d / "chrome_tab_host.py"}" "$@"\n')
+    launcher.chmod(0o755)
+    manifest = {
+        "name": HELPER_NAME,
+        "description": "chrome-tab helper: relays the chrome-tab command's requests to its extension",
+        "path": str(launcher),
+        "type": "stdio",
+        "allowed_origins": [f"chrome-extension://{HELPER_EXT_ID}/"],
+    }
+    nmh_dir().mkdir(parents=True, exist_ok=True)
+    helper_manifest_path().write_text(json.dumps(manifest, indent=2) + "\n")
+    version = json.loads((d / "extension" / "manifest.json").read_text())["version"]
+    print(f"✓ helper {version} installed in {d}")
+    print(f"✓ Chrome can start its host: {helper_manifest_path()}")
+    running = helper_host()
+    if running:
+        try:
+            helper_call("reload", timeout=3)
+        except HelperError:
+            pass
+        print("✓ the running extension is reloading with these files (a few seconds)")
+        return
+    print(f"""
+One step left, once, in the Chrome profile you use:
+  1. open chrome://extensions and switch on “Developer mode” (top right)
+  2. click “Load unpacked” and choose:  {d / 'extension'}
+     (in the file picker, ⇧⌘G then paste that path)
+Then check it with:  chrome-tab helper status""")
+
+
+def helper_status(args):
+    d = helper_dir()
+    m = helper_manifest_path()
+    ok = True
+    def line(good, text):
+        nonlocal ok
+        ok = ok and good
+        print(f"{'✓' if good else '✗'} {text}")
+    installed = m.exists() and (d / "host").exists() and (d / "extension" / "manifest.json").exists()
+    if not installed:
+        print("✗ not installed. Install:  chrome-tab helper install")
+        sys.exit(1)
+    try:
+        path = json.loads(m.read_text()).get("path")
+    except ValueError:
+        path = None
+    line(path == str(d / "host"), f"host registered with Chrome ({m})")
+    src_v = json.loads((HELPER_SRC / "extension" / "manifest.json").read_text())["version"] \
+        if (HELPER_SRC / "extension" / "manifest.json").exists() else None
+    inst_v = json.loads((d / "extension" / "manifest.json").read_text())["version"]
+    line(src_v in (None, inst_v), f"extension files {inst_v} in {d / 'extension'}"
+         + ("" if src_v in (None, inst_v) else f" — this chrome-tab ships {src_v}: chrome-tab helper install"))
+    host = helper_host()
+    if not host:
+        line(False, "not running. If you haven't yet: chrome://extensions → Developer mode → "
+                    f"Load unpacked → {d / 'extension'}. If you have: check it's switched on.")
+        sys.exit(1)
+    ext = host.get("extension") or {}
+    t0 = time.monotonic()
+    try:
+        pong = helper_call("ping", timeout=3)
+    except HelperError as e:
+        pong = None
+        line(False, f"host {host.get('pid')} runs, but the extension didn't answer: {e}")
+    if pong:
+        line(True, f"running: extension {pong.get('version')} ({pong.get('extensionId')}), host pid "
+                   f"{host.get('pid')}, Chrome pid {host.get('chrome_pid')}, round trip "
+                   f"{(time.monotonic() - t0) * 1000:.0f} ms")
+        if pong.get("version") != inst_v:
+            line(False, f"Chrome is running extension {pong.get('version')}, the files are {inst_v}: "
+                        "reload it in chrome://extensions")
+    sys.exit(0 if ok else 1)
+
+
+def helper_uninstall(args):
+    d = helper_dir()
+    m = helper_manifest_path()
+    if m.exists():
+        m.unlink()
+        print(f"✓ removed {m}")
+    launcher = d / "host"
+    if launcher.exists() and LAUNCHER_HEAD in launcher.read_text(errors="ignore"):
+        shutil.rmtree(d)
+        print(f"✓ removed {d}")
+    elif d.exists():
+        print(f"left {d} alone: it doesn't look like the helper's folder")
+    print("Last step: remove “chrome-tab helper” in chrome://extensions.")
+
+
+# ------------------------------------------------ Claude-in-Chrome tab mover
+#
+# The Claude-in-Chrome extension makes each session's tab group in whichever window had
+# focus last (chrome.windows.getLastFocused) and has no setting for it. A PostToolUse hook
+# on its tools reads the group the tool just reported and, if it's brand new, has the
+# helper move the whole group into the browse window. tabGroups.move keeps the group's id
+# (verified in Chrome for Testing 153), so the session's stored group stays valid even if
+# Claude-in-Chrome's own listener isn't running. When the listener is running, it sees
+# the tab leave its group for a moment (groupId -1, also verified) and regroups it in
+# the new window — which also works, because it rotates the session's stored id.
+
+DEFAULT_BROWSE = None       # None: the home window (chrome-tab home)
+CIC_TOOLS = re.compile(r"^mcp__claude-in-chrome__(tabs_context_mcp|navigate|browser_batch)$")
+CIC_FRONT_LOADED = re.compile(r"Tab context \(from front-loaded tabs_context_mcp\):\n(\{.*\})")
+CIC_BATCH_LINE = re.compile(r"^\[tabs_context_mcp\] (\{.*\})$", re.M)
+
+
+def browse_window_name():
+    env = os.environ.get("CHROME_TAB_BROWSE_WINDOW", "").strip()
+    if env:
+        return env
+    v = read_config().get("browse_window")
+    return v.strip() if isinstance(v, str) and v.strip() else (DEFAULT_BROWSE or home_window_name())
+
+
+def browse_target(event, windows, ext):
+    """(window, anchor group id or None, why) for a session's browsing group.
+
+    2026-09-17, the user's pick: beside the group this session's pages went to (the binding
+    written by `chrome-tab open`), else the browse window (default: the home window).
+    """
+    b = read_binding(event.get("session_id")) if event.get("session_id") else None
+    if b and b.get("group") and b.get("window_name"):
+        w = next((w for w in windows if w["given_name"].lower() == b["window_name"].lower()), None)
+        if w:
+            gid = None
+            for x in ext or []:
+                if str(x["id"]) == w["id"]:
+                    gid = next((g["id"] for g in x.get("groups") or [] if g["title"] == b["group"]), None)
+            return w, gid, f"beside this session's “{b['group']}” group in “{w['given_name']}”"
+    name = browse_window_name()
+    w = next((w for w in windows if w["given_name"].lower() == name.lower()), None)
+    return w, None, f"into the “{name}” window"
+
+
+def _response_texts(resp):
+    """The text blocks of a tool_response: MCP tools give a list of content blocks."""
+    if isinstance(resp, str):
+        return [resp]
+    if isinstance(resp, dict):
+        resp = resp.get("content", [resp])
+    out = []
+    for b in resp if isinstance(resp, list) else []:
+        if isinstance(b, str):
+            out.append(b)
+        elif isinstance(b, dict) and b.get("type") == "text":
+            out.append(b.get("text") or "")
+    return out
+
+
+def claude_groups_in(resp):
+    """Every tab-context object ({availableTabs, tabGroupId, …}) a Claude-in-Chrome result reports.
+
+    Three shapes carry one (seen across 191 calls, 2026-09-17): a whole text block that is
+    the JSON (tabs_context_mcp); a "Tab context (from front-loaded tabs_context_mcp):" block
+    that Claude Code appends to a navigate without a tabId; and "[tabs_context_mcp] {…}"
+    lines inside a browser_batch result.
+    """
+    found = {}
+    for text in _response_texts(resp):
+        candidates = [text.strip()] + CIC_FRONT_LOADED.findall(text) + CIC_BATCH_LINE.findall(text)
+        for c in candidates:
+            if not c.startswith("{"):
+                continue
+            try:
+                obj = json.loads(c)
+            except ValueError:
+                continue
+            if (isinstance(obj, dict) and isinstance(obj.get("availableTabs"), list)
+                    and isinstance(obj.get("tabGroupId"), int)):
+                found[obj["tabGroupId"]] = obj
+    return list(found.values())
+
+
+def fresh_groups(resp):
+    """The reported groups that look brand new: one tab, and no tab of it selected yet."""
+    return [g for g in claude_groups_in(resp)
+            if len(g["availableTabs"]) == 1 and "selectedTabId" not in g
+            and isinstance(g["availableTabs"][0].get("tabId"), int)]
+
+
+def hook_log(msg):
+    try:
+        d = helper_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        with (d / "hook.log").open("a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n")
+    except Exception:
+        pass
+
+
+def _moved_record():
+    f = helper_dir() / "moved.json"
+    try:
+        data = json.loads(f.read_text())
+    except Exception:
+        data = {}
+    cutoff = time.time() - 7 * 86400
+    return f, {k: v for k, v in data.items() if isinstance(v, (int, float)) and v > cutoff}
+
+
+def claim_claude_tab(event):
+    """Move a brand-new Claude-in-Chrome session group into the browse window.
+
+    Returns a line for the session (or None). Guardrails: only a group the tool just
+    reported, holding exactly that one tab, only once per tab (a group the user drags
+    elsewhere afterwards stays there), never an active tab, never a window created.
+    """
+    groups = fresh_groups(event.get("tool_response"))
+    if not groups:
+        return None
+    host = helper_host()
+    if not host:
+        hook_log(f"skip: helper not running ({event.get('tool_name')})")
+        return ("chrome-tab's helper isn't running, so this session's Chrome tab group stayed "
+                "in the window Chrome last had focus in (chrome-tab helper status).")
+    windows = list_windows(host.get("chrome_pid"))
+    try:
+        ext = helper_call("windows") or []
+    except HelperError:
+        ext = []
+    target, anchor, why = browse_target(event, windows, ext)
+    name = target["given_name"] if target else browse_window_name()
+    record_file, moved = _moved_record()
+    for g in groups:
+        tab_id = g["availableTabs"][0]["tabId"]
+        if str(tab_id) in moved:
+            continue
+        try:
+            info = helper_call("tab", timeout=3, tabId=tab_id)
+        except HelperError as e:
+            hook_log(f"skip tab {tab_id}: {e}")
+            continue
+        grp = (info or {}).get("group")
+        if not grp or grp["id"] != g["tabGroupId"] or grp.get("tabs") != 1:
+            hook_log(f"skip tab {tab_id}: not a lone tab in reported group {g['tabGroupId']} ({grp})")
+            continue
+        here = next((w for w in windows if w["id"] == str(info["windowId"])), None)
+        here_name = (here or {}).get("given_name") or f"window {info['windowId']}"
+        if target is None:
+            hook_log(f"skip tab {tab_id}: no window named {name!r}; it is in {here_name!r}")
+            return (f"No Chrome window named “{name}” is open, so this session's tab group stayed in "
+                    f"“{here_name}”. Tell the user in one line; naming a window “{name}” fixes it.")
+        if str(info["windowId"]) == target["id"]:
+            moved[str(tab_id)] = time.time()
+            continue
+        if info.get("active"):
+            hook_log(f"skip tab {tab_id}: it is the tab {here_name!r} is showing")
+            continue
+        t0 = time.monotonic()
+        guard = FocusGuard()
+        with guard:
+            r = helper_call("moveGroup", timeout=5, groupId=g["tabGroupId"], windowId=int(target["id"]),
+                            afterGroupId=anchor)
+            # Wait until the tab sits in the target window inside a group again (Claude-in-
+            # Chrome may regroup it), so the session's next step finds it in place.
+            settled = None
+            for _ in range(30):
+                now = helper_call("tab", timeout=2, tabId=tab_id) or {}
+                if str(now.get("windowId")) == target["id"] and now.get("group"):
+                    settled = now
+                    break
+                time.sleep(0.1)
+            guard.done()
+        moved[str(tab_id)] = time.time()
+        try:
+            record_file.write_text(json.dumps(moved))
+        except Exception:
+            pass
+        ms = (time.monotonic() - t0) * 1000
+        hook_log(f"moved tab {tab_id} group {g['tabGroupId']} {here_name!r} → {name!r} ({why}) in {ms:.0f} ms; "
+                 f"events {r.get('events')}; now group {(settled or {}).get('group')}; "
+                 f"{guard.describe() or 'guard off (user in Chrome)'}")
+        return (f"chrome-tab moved this session's Chrome tab group (tab {tab_id}) from “{here_name}” "
+                f"{why}.")
+    try:
+        record_file.write_text(json.dumps(moved))
+    except Exception:
+        pass
+    return None
+
+
+def cmd_hook(args):
+    try:
+        event = json.load(sys.stdin)
+    except Exception:
+        return
+    if not CIC_TOOLS.match(str(event.get("tool_name", ""))):
+        return
+    try:
+        msg = claim_claude_tab(event)
+    except SystemExit:
+        return
+    except Exception as e:            # a hook must never break the tool call
+        hook_log(f"error: {e!r}")
+        return
+    if msg:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                                 "additionalContext": msg}}))
+
+
+def cmd_helper(args):
+    {"install": helper_install, "status": helper_status, "uninstall": helper_uninstall}[args.action](args)
+
+
+def find_tab_window(tab_id, chrome_pid=None):
+    """(window dict, tab info or None) for a tab id, or (None, None)."""
+    info = None
+    try:
+        info = helper_call("tab", timeout=3, tabId=int(tab_id))
+    except HelperError:
+        return None, None
+    windows = list_windows(chrome_pid)
+    if info:
+        w = next((w for w in windows if w["id"] == str(info["windowId"])), None)
+        return w, info
+    # No helper: ask AppleScript, read-only (extension and AppleScript tab ids are the same).
+    raw = osa(f"""
+tell application "Google Chrome"
+  repeat with i from 1 to count of windows
+    if (id of every tab of window i) contains ({int(tab_id)} as integer) then return (id of window i) as text
+  end repeat
+  return ""
+end tell""")
+    w = next((w for w in windows if w["id"] == raw.strip()), None)
+    return w, None
+
+
+def cmd_where(args):
+    host = helper_host()
+    w, info = find_tab_window(args.tab_id, host.get("chrome_pid") if host else None)
+    if not w:
+        die(f"no open tab has id {args.tab_id}")
+    name = w["given_name"] or f"(unnamed window {w['id']})"
+    extra = ""
+    if info and info.get("group"):
+        extra = f", group “{info['group']['title']}”"
+    print(f"tab {args.tab_id} is in window “{name}”{extra}")
+
+
+def cmd_move(args):
+    host = helper_host()
+    if not host:
+        die("moving a tab needs the chrome-tab helper (chrome-tab helper status). "
+            "AppleScript can't do it: its move closes the tab and opens a blank one.")
+    chrome_pid = host.get("chrome_pid")
+    windows = list_windows(chrome_pid)
+    dest = resolve_window(args.window, windows, titles=False)
+    if not dest:
+        die(f"no window named “{args.window}” is open (names: chrome-tab list)")
+    try:
+        info = helper_call("tab", timeout=3, tabId=int(args.tab_id))
+    except HelperError as e:
+        die(f"no open tab has id {args.tab_id} ({e})")
+    if str(info["windowId"]) == dest["id"]:
+        print(f"tab {args.tab_id} is already in “{dest['given_name']}”")
+        return
+    if info.get("active") and not args.force:
+        die(f"tab {args.tab_id} is the tab its window is showing, so moving it would change what "
+            "that window shows. Pass --force to move it anyway.")
+    guard = FocusGuard()
+    with guard:
+        helper_call("move", timeout=5, tabId=int(args.tab_id), windowId=int(dest["id"]))
+        guard.done()
+    print(f"✓ moved tab {args.tab_id} to “{dest['given_name']}”")
+    what = guard.describe()
+    if what:
+        print(f"  ({what})")
 
 
 def place_tab(win_id, url, looking, args):
@@ -802,6 +1586,8 @@ FOCUS_LOG = Path.home() / ".claude" / "chrome-tab-focus.log"
 
 
 def cmd_open(args):
+    if args.new_window and not args.window:
+        die("--new-window needs --window NAME, so the window can be found again")
     urls = [to_url(t) for t in args.targets]
     # Who is in front before we touch anything — the guard records it, and it is
     # measured again at the end so the closing line is a reading, not a promise.
@@ -809,59 +1595,109 @@ def cmd_open(args):
     before_name = guard.name
     chrome_is_front = guard.bid == CHROME_BID
 
+    # The helper, when it runs, does the navigating: an extension adds a background tab
+    # without asking macOS to raise Chrome, and it can make tab groups. Its host also
+    # knows which Chrome process runs it, so names are read from that process.
+    host = helper_host()
+    chrome_pid = host.get("chrome_pid") if host else None
+    notes = []
+
     # --- pick the target window -------------------------------------------
-    windows = list_windows()
+    windows = list_windows(chrome_pid)
     # What the user sees on top inside Chrome. Chrome's `front window` can be a
     # minimized one (observed 2026-09-03), so take the first that isn't.
     visible_front = next((w["id"] for w in windows if not w["minimized"]), None)
-    target = None
     wanted_name = args.window or os.environ.get("CLAUDE_CHROME_WINDOW")
-    if not wanted_name:
-        b = read_binding()
-        if b:
-            wanted_name = b.get("window_name")
-
-    if not args.new_window:
-        if wanted_name:
-            target = resolve_window(wanted_name, windows)
-        elif windows:
-            # No hint at all: refuse to guess silently. Use the bound-or-new name.
-            wanted_name = default_window_name()
-            target = resolve_window(wanted_name, windows)
+    binding = read_binding() or {}
+    if not wanted_name and not binding.get("group") and binding.get("window_name"):
+        wanted_name = binding.get("window_name")          # a binding from before 0.4.0
+    ext = None
+    if host:
+        try:
+            ext = helper_call("windows") or []
+        except HelperError as e:
+            notes.append(f"the helper didn't answer ({e}), so AppleScript was used")
+    plan = plan_placement(windows, ext, wanted_name, args.group, binding, args.targets,
+                          home_window_name(), args.new_window)
+    target, create_name, fell_back = plan["window"], plan["create_name"], plan["fell_back"]
+    group = plan["group"]
+    bridge = ext is not None and (target is None or any(str(w["id"]) == target["id"] for w in ext))
+    if ext is not None and not bridge:
+        notes.append("the helper can't see that window (another Chrome profile?), "
+                     "so it was opened by AppleScript")
+        group = None
+    if ext is None and (args.group or fell_back):
+        notes.append(f"not grouped as “{plan['topic']}”: tab groups need the helper extension "
+                     "(chrome-tab helper status)")
 
     created = False
-    results = []
+    results = []                        # (url, action, group-info or None)
+    was_minimized = looking = used_applescript = False
     with guard:
         if target is None:
-            name = wanted_name or default_window_name()
-            wid = osa(CREATE_SCRIPT, name, urls[0])
+            wid = None
+            if bridge:
+                try:
+                    r = helper_call("createWindow", timeout=15, url=urls[0], group=group,
+                                    color=args.color)
+                    if r:
+                        wid = str(r["windowId"])
+                        name_window(wid, create_name, chrome_pid)
+                        results.append((urls[0], "created", r.get("group")))
+                except HelperError as e:
+                    notes.append(f"the helper couldn't make the window ({e}); AppleScript did")
+            if wid is None:
+                wid = osa(CREATE_SCRIPT, create_name, urls[0])
+                results.append((urls[0], "created", None))
+                used_applescript = True
             created = True
-            target = {"id": wid, "given_name": name, "index": 0, "title": "", "tabs": 1,
+            target = {"id": wid, "given_name": create_name, "index": 0, "title": "", "tabs": 1,
                       "minimized": False}
             urls = urls[1:]
-            if args.bind or not args.window:
-                write_binding(name)
 
         was_minimized = bool(target.get("minimized"))
         looking = (chrome_is_front and target["id"] == visible_front
                    and not was_minimized and not args.activate)
         for u in urls:
-            results.append((u, place_tab(target["id"], u, looking, args)))
+            if bridge:
+                try:
+                    r = helper_call("open", timeout=15, url=u, windowId=int(target["id"]),
+                                    group=group, color=args.color, reuse=not args.no_reuse,
+                                    looking=looking, forceReload=args.force_reload,
+                                    noSelect=args.no_select)
+                    if r:
+                        results.append((u, r["action"], r.get("group")))
+                        continue
+                    notes.append("the helper stopped answering; AppleScript opened the rest")
+                except HelperError as e:
+                    if "file" in str(e).lower() and "access" in str(e).lower():
+                        notes.append("the helper may not open local files: in chrome://extensions → "
+                                     "chrome-tab helper → Details, turn on “Allow access to file URLs”")
+                    notes.append(f"the helper refused ({e}); AppleScript opened it")
+                bridge = False
+            results.append((u, place_tab(target["id"], u, looking, args), None))
+            used_applescript = True
 
-        navigated = created or any(r in ("added", "added-beside") for _, r in results)
+        navigated = created or any(a in ("added", "added-beside") for _, a, _ in results)
         if navigated and not args.activate:
-            # Showing the window raised it inside Chrome, and de-minimized it if
-            # it was minimized. Put both back before the user can notice.
-            if visible_front and visible_front != target["id"]:
-                osa(RAISE_SCRIPT, visible_front)
-            if was_minimized:
-                osa(MINIMIZE_SCRIPT, target["id"])
+            if used_applescript:
+                # AppleScript's `set URL` shows the window, which raises it inside Chrome
+                # and de-minimizes it. Put both back before the user can notice.
+                if visible_front and visible_front != target["id"]:
+                    osa(RAISE_SCRIPT, visible_front)
+                if was_minimized:
+                    osa(MINIMIZE_SCRIPT, target["id"])
+            else:
+                # The extension adds tabs in the background; check rather than assume.
+                settle_after_helper(visible_front, target, was_minimized, chrome_pid)
         # Reloads never activate Chrome (measured), so don't make them wait.
         guard.done(tail=None if navigated else 0)
 
     # The delayed second show can reorder windows again; check once more.
     if navigated and not args.activate and visible_front and visible_front != target["id"]:
-        if osa(FRONT_WIN_SCRIPT) != visible_front:
+        now = list_windows(chrome_pid)
+        front_now = next((w["id"] for w in now if not w["minimized"]), None)
+        if front_now and front_now != visible_front:
             osa(RAISE_SCRIPT, visible_front)
 
     if args.bind and args.window:
@@ -872,24 +1708,51 @@ def cmd_open(args):
 
     # --- report ------------------------------------------------------------
     label = target["given_name"] or f"window {target['id']}"
+    groups = [g for _, _, g in results if g]
+    where = f"Chrome window “{label}”"
+    if groups:
+        g = groups[-1]
+        fresh = any(x.get("created") for x in groups)
+        where += f", group “{g['title']}”" + (f" (new, {g['color']})" if fresh else "")
+    if fell_back and groups:
+        print(f"no window named “{wanted_name}” is open, so “{plan['topic']}” is the tab group "
+              f"(a new window only with --new-window)")
+    elif fell_back:
+        print(f"no window named “{wanted_name}” is open, so this went to the home window "
+              f"“{label}” (a new window only with --new-window; names: chrome-tab list)")
     if created:
-        print(f"✓ created Chrome window “{label}” · {len(args.targets)} tab(s)")
-    else:
-        n = lambda kind: sum(1 for _, r in results if r == kind)
-        bits = []
-        if n("added"):
-            bits.append(f"{n('added')} new tab(s)")
-        if n("reused"):
-            bits.append(f"{n('reused')} reloaded in place")
-        if n("added-beside"):
-            bits.append(f"{n('added-beside')} opened in a new tab behind the one you're reading")
-        print(f"✓ {' + '.join(bits) or 'nothing to do'} in Chrome window “{label}”")
-        if n("added-beside"):
-            print("  (left your open copy untouched — pass --force-reload to override)")
-        elif looking and n("added"):
-            print("  (opened behind the tab you're reading — it's there when you switch)")
+        print(f"✓ created {where} · {len(args.targets)} tab(s)")
+    n = lambda kind: sum(1 for _, a, _ in results if a == kind)
+    bits = []
+    if n("added"):
+        bits.append(f"{n('added')} new tab(s)")
+    if n("reused"):
+        bits.append(f"{n('reused')} reloaded in place")
+    if n("added-beside"):
+        bits.append(f"{n('added-beside')} opened in a new tab behind the one you're reading")
+    if bits or not created:
+        print(f"✓ {' + '.join(bits) or 'nothing to do'} in {where}")
+    if n("added-beside"):
+        print("  (left your open copy untouched — pass --force-reload to override)")
+    elif looking and n("added"):
+        print("  (opened behind the tab you're reading — it's there when you switch)")
+    if groups:
+        g = groups[-1]
+        if plan["followed"]:
+            print(f"  (followed the group “{g['title']}” into “{label}”)")
+        if group_score(plan["topic"], g["title"]) == 1:
+            print(f"  (matched “{plan['topic']}” to the group “{g['title']}”)")
+        if any(x.get("created") for x in groups):
+            src = plan["topic_source"]
+            others = ", ".join(plan["others"][:14]) or "none"
+            print(f"  (new group, named from {src}; other groups in this window: {others} — "
+                  f"re-run with --group to use one of those instead)")
+        write_binding(label, g["title"])
     if was_minimized:
         print("  note: that window is minimized — the tab is there when you restore it.")
+    for note in notes:
+        print(f"  note: {note}")
+    via = "helper" if not used_applescript else "AppleScript"
     if not args.activate:
         after_name = front_app()[0]
         what = guard.describe()
@@ -905,8 +1768,8 @@ def cmd_open(args):
             try:
                 with FOCUS_LOG.open("a") as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  guard  {what} "
-                            f"while opening in “{label}”{' (new window)' if created else ''}; "
-                            f"user was in {before_name}\n")
+                            f"while opening in “{label}”{' (new window)' if created else ''} "
+                            f"via {via}; user was in {before_name}\n")
             except Exception:
                 pass
         if after_name == before_name or before_name is None:
@@ -922,9 +1785,21 @@ def cmd_open(args):
                 with FOCUS_LOG.open("a") as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  chrome-tab  moved focus "
                             f"{before_name} → {after_name} while opening in “{label}”"
-                            f"{' (new window)' if created else ''}\n")
+                            f"{' (new window)' if created else ''} via {via}\n")
             except Exception:
                 pass
+
+
+def settle_after_helper(visible_front, target, was_minimized, chrome_pid):
+    """After the extension navigated: undo a window raise or de-minimize only if one happened."""
+    now = list_windows(chrome_pid)
+    front_now = next((w["id"] for w in now if not w["minimized"]), None)
+    if visible_front and visible_front != target["id"] and front_now == target["id"]:
+        osa(RAISE_SCRIPT, visible_front)
+    if was_minimized:
+        t = next((w for w in now if w["id"] == target["id"]), None)
+        if t and not t["minimized"]:
+            osa(MINIMIZE_SCRIPT, target["id"])
 
 
 # ----------------------------------------------------------------------- main
@@ -1017,6 +1892,18 @@ def cmd_doctor(args):
                       f"50 ms polls + `open -b`, so a jump can show for a frame or two. "
                       f"Fix:  {pip_hint()}")
 
+    if helper_manifest_path().exists():
+        host = helper_host()
+        if host:
+            ext = host.get("extension") or {}
+            ok("helper", f"running (extension {ext.get('version', '?')}, Chrome pid {host.get('chrome_pid')})"
+                         " — tab groups on, pages open without AppleScript navigation")
+        else:
+            bad("helper", "installed but not running — load it once: chrome://extensions → Developer "
+                          f"mode → Load unpacked → {helper_dir() / 'extension'}  (chrome-tab helper status)")
+    else:
+        ok("helper", "not installed (optional: tab groups, quieter opens) — chrome-tab helper install")
+
     if sys.platform != "darwin":
         bad("macOS", "not macOS — chrome-tab drives Chrome via AppleScript")
     elif not chrome_installed():
@@ -1053,7 +1940,11 @@ def main():
     po = sub.add_parser("open", help="open url(s)/file(s) in a chosen window")
     po.add_argument("targets", nargs="+")
     po.add_argument("--window", "-w", help="target window given-name (or #index)")
-    po.add_argument("--new-window", action="store_true")
+    po.add_argument("--group", "-g", help="tab group to put it in (needs the helper)")
+    po.add_argument("--color", choices=["grey", "blue", "red", "yellow", "green", "pink", "purple",
+                                        "cyan", "orange"], help="colour for a new group")
+    po.add_argument("--new-window", action="store_true",
+                    help="make a new window (named via --window) — only when the user asks")
     po.add_argument("--activate", action="store_true", help="bring Chrome forward")
     po.add_argument("--no-reuse", action="store_true", help="never reload an existing tab")
     po.add_argument("--force-reload", action="store_true",
@@ -1073,6 +1964,23 @@ def main():
     pb.set_defaults(func=cmd_bind)
 
     sub.add_parser("unbind", help="drop this session's binding").set_defaults(func=cmd_unbind)
+    phl = sub.add_parser("helper", help="install / check / remove the companion extension")
+    phl.add_argument("action", choices=["install", "status", "uninstall"])
+    phl.set_defaults(func=cmd_helper)
+    pw = sub.add_parser("where", help="which window holds a tab (by tab id)")
+    pw.add_argument("tab_id")
+    pw.set_defaults(func=cmd_where)
+    pk = sub.add_parser("hook", help="PostToolUse hook entry points (see scripts/install-cic-hook.py)")
+    pk.add_argument("kind", choices=["claude-in-chrome"])
+    pk.set_defaults(func=cmd_hook)
+    pm = sub.add_parser("move", help="move a tab into a named window (needs the helper)")
+    pm.add_argument("tab_id")
+    pm.add_argument("--window", "-w", required=True)
+    pm.add_argument("--force", action="store_true", help="move it even if its window is showing it")
+    pm.set_defaults(func=cmd_move)
+    ph = sub.add_parser("home", help="show or set the home window (default “Claude sessions”)")
+    ph.add_argument("name", nargs="?")
+    ph.set_defaults(func=cmd_home)
     sub.add_parser("whoami", help="show this session's window binding").set_defaults(
         func=cmd_whoami
     )
@@ -1082,7 +1990,7 @@ def main():
     pd.set_defaults(func=cmd_doctor)
 
     args = p.parse_args()
-    if args.cmd != "doctor":
+    if args.cmd not in ("doctor", "home", "helper", "hook"):
         require_macos_chrome()
     args.func(args)
 
