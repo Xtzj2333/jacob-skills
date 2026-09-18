@@ -6,7 +6,7 @@ Nine collaborator-facing skills, grouped by purpose:
 - **Manuscript revision loop** — `commented-edit-roundtrip` (bridges margin comments and TODOs), `revision-queue` (state machine + audit log)
 - **Push utility** — `tony-github-push`
 - **Project navigation** — `project-map` (creates and maintains `MAP.md` orientation files at project roots)
-- **Reading what Claude renders** — `chrome-tab` (opens a page in a *named* Chrome window without stealing focus; macOS + Chrome only, and the one skill here that needs a post-install step)
+- **Reading what Claude renders** — `chrome-tab` (opens a page in the right Chrome window and tab group without stealing focus; macOS + Chrome only, and the one skill here that needs a post-install step)
 - **Cowork-only personal-life utility** — `calendar-search` (Google Calendar lookup; Jacob-personalized — install on Cowork, not Claude Code)
 
 > **Plus one utility skill** — `project-filename` — called by `revision-queue`, `commented-edit-roundtrip`, and `citation-deepening` to produce per-project filenames in the `<role> [<project>].<ext>` convention. You won't trigger it directly; the other skills invoke it. Documented in its own SKILL.md if you want the details.
@@ -29,7 +29,7 @@ Nine collaborator-facing skills, grouped by purpose:
 | 6 | tony-github-push | "tony github push" / `/tony-github-push` | Push of configured dir to configured branch | one configured dir |
 | 7 | calendar-search | "is X on my calendar" / "do I have a Y" / "when is my Z" | Located event with calendar name + source-zone time | every calendar in your account |
 | 8 | project-map | "set up a MAP" / "create a project map" / "orient me to this folder" | `MAP.md` at the folder root — folder structure, source/draft flags, provenance | one MAP per folder root |
-| 9 | chrome-tab | fires when Claude opens HTML for you; "wrong Chrome window" / "stop jumping my screen" | Page placed in a window you named, no focus steal | one reused window per project/topic |
+| 9 | chrome-tab | fires when Claude opens HTML for you; "wrong Chrome window" / "stop jumping my screen" | Page placed in its tab group in the right window, no focus steal, never a new window | one tab group per project/topic (helper extension, optional) |
 
 ---
 
@@ -317,7 +317,7 @@ One command for a routine push, with the right `cd` / branch / staging done for 
 
 ---
 
-## 9. chrome-tab — open a page in a *named* Chrome window, without stealing focus
+## 9. chrome-tab — open a page in the right Chrome window and tab group, without stealing focus
 
 **Platform.** macOS + Google Chrome only. It drives Chrome's AppleScript interface; it exits with a clear message anywhere else.
 
@@ -338,15 +338,22 @@ The launcher runs whichever copy Claude Code has installed, so `claude plugin up
 **Usage.**
 
 ```
-chrome-tab list                                # windows by name, not by opaque id
-chrome-tab open report.html --window "educ"    # place it there, quietly
+chrome-tab open report.html                    # the matching tab group, wherever it is; else a new one in the home window
+chrome-tab open report.html --group "mail archive"  # name the topic when the file's folder isn't it
+chrome-tab list                                # windows by name, with their tab groups
+chrome-tab open report.html --window "educ"    # a window you keep or named (rare)
 chrome-tab open report.html --activate         # ...and bring Chrome forward
 chrome-tab name "#3" "mail archive"            # label an unnamed window
+chrome-tab home                                # show the home window; `home NAME` sets it
 ```
 
 **Windows are addressed by name.** Chrome exposes the label you set by right-clicking the tab strip → "Name window…" as a read/write `given name` property. So Claude can ask "the `educ` window or the `LLM and Culture` one?" instead of quoting `940044950`, and can label an unnamed window for you.
 
-**Named windows are the only grouping available.** Chrome's coloured tab groups cannot be scripted — extension-only API — and the Claude-in-Chrome extension refuses `file://` URLs. So local report files can never join a coloured group; one reused window per project/topic is the workable convention.
+**Never a new window you didn't ask for (0.2.0).** A `--window` name that matches no open window goes to the home window (default "Claude sessions"; `chrome-tab home NAME` changes it), not to a brand-new window. Only `--new-window` makes one.
+
+**Tab groups, via the optional helper extension (0.3.0–0.4.0).** AppleScript has no tab groups, so the plugin ships a small extension plus a native-messaging host. Once: `chrome-tab helper install`, then in Chrome `chrome://extensions` → Developer mode → Load unpacked → `~/.claude/chrome-tab-helper/extension`; check with `chrome-tab helper status`. With it running, every page lands in its matching tab group: the topic is `--group`, else the `--window` name, else the session's earlier group, else the file's project folder; it is matched loosely against the groups in every window ("mail archive" → "Mail archive"), a match wins wherever it lives, otherwise a new group is made in the home window. The extension also adds tabs in the background (nothing asks macOS to raise Chrome), reads window names from the Chrome that runs it by process id, and makes `chrome-tab where` / `chrome-tab move` possible. Without it, everything works as before, windows only.
+
+**Claude-in-Chrome tabs beside the session's pages (optional hook).** `scripts/install-cic-hook.py` (you run it) adds a PostToolUse hook that moves a brand-new Claude-in-Chrome session group right after the group this session's pages went to, else into the home window. Needs the helper.
 
 **Re-opening a file that's already open** reloads that tab in place instead of piling up duplicates — unless you're reading it right now (Chrome frontmost + that window on top + that tab active), in which case the new render opens beside your copy and your view is left alone.
 

@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-09-17 — `chrome-tab` 0.4.0: no more window per topic; tab groups, a real tab move and a quiet open path via an optional helper extension; Claude-in-Chrome tabs placed beside the session's pages
+
+**TL;DR for anyone on the plugin:** `claude plugin update chrome-tab@jacob-skills`. Nothing else is required: without the helper you get 0.2.0's behaviour (below) and everything still works over AppleScript. The helper and the hook are opt-in, each one command plus, for the extension, one click in `chrome://extensions`.
+
+### 0.2.0 — a `--window` name that matches no open window no longer makes a window
+
+Sessions pass `--window "<topic>"`, and for a topic no window had, chrome-tab created a brand-new window. On one Mac that was 76 windows in five weeks. Now such a page goes to the **home window** (default "Claude sessions"; `chrome-tab home NAME` changes it) and the output says so. Only `--new-window` (now requires `--window NAME`) or a missing home window makes a window. Re-opening a page reuses its tab even after an in-page link added a `#fragment`.
+
+### 0.3.0 — the helper extension (optional)
+
+Chrome's AppleScript has no tab groups, its `move` closes a tab and opens a blank one, and every URL it sets asks macOS to raise Chrome. A small MV3 extension (`helper/extension`, permissions: tabs, tabGroups, nativeMessaging, alarms) plus a native-messaging host (`helper/chrome_tab_host.py`, a Unix socket only your user can open) does those jobs through the extension API instead. Setup, once:
+
+```
+chrome-tab helper install     # copies the files to ~/.claude/chrome-tab-helper and registers the host with Chrome
+# then in Chrome: chrome://extensions → Developer mode → Load unpacked → ~/.claude/chrome-tab-helper/extension
+chrome-tab helper status      # running? which version? round trip?
+```
+
+With it running: `--group NAME` puts a page in a tab group (created and coloured if missing), `chrome-tab where <tab-id>` and `chrome-tab move <tab-id> --window NAME` work, `list` shows each window's groups, and pages are added in the background by the extension so nothing asks macOS to bring Chrome forward. Window names are read from the Chrome that runs the helper by process id, so a headless copy of Chrome launched by another job can't answer in its place. `chrome-tab helper uninstall` removes it.
+
+### 0.4.0 — every page lands in its matching tab group
+
+With the helper running, the tool picks the group itself, so nothing depends on a session remembering a rule: the topic is `--group`, else the `--window` name given on this call, else the group this session used before, else the file's project folder (`<project>/reports (claude)/…`), else the current folder. It is matched loosely against the groups in every window (same words ignoring case and punctuation, or each word of the shorter name starting a word of the longer one: "mail archive" → "Mail archive", "Furniture" → "Furnitures"; short names like "FE" only match exactly). A match wins wherever it lives; otherwise a new group in the home window. The output names the group and, when it made a new one, lists the others in that window; re-running with `--group` moves the page. Claude-in-Chrome's own groups ("Claude", "✅Claude") are never matched or added to.
+
+### Claude-in-Chrome tabs beside the session's pages (optional hook)
+
+The Claude-in-Chrome extension creates each session's tab group in whichever window had focus last. `scripts/install-cic-hook.py` (you run it; it edits `settings.json` with a backup, `--remove` undoes it) adds a PostToolUse hook on `tabs_context_mcp`, `navigate` and `browser_batch`. When one reports a brand-new one-tab session group, the hook has the helper move the whole group right after the group this session's pages went to, else into the home window. It moves only that group, once, never an active tab, never creating a window; if the target window isn't open it moves nothing and the session is told. Verified live: about 2 s, nothing raised, the session keeps working. Decisions go to `~/.claude/chrome-tab-helper/hook.log`.
+
+### Tests
+
+`scripts/test-target.py` (placement, pure logic), `scripts/test-helper.py` and `scripts/test-cic-hook.py` (the real extension and host in a throwaway headless Chrome for Testing; set `CHROME_TAB_TEST_BROWSER`), `scripts/test-pickup.py` (0.1.3's launcher). Any browser launched for tests needs `--use-mock-keychain --password-store=basic`, or macOS shows a keychain password dialog.
+
 ## 2026-09-15 — `chrome-tab` 0.1.3: updates take effect by themselves; `chrome-tab doctor`; PyObjC no longer degrades silently
 
 **TL;DR for anyone on the plugin:** `claude plugin update chrome-tab@jacob-skills`, then start a new session — nothing else. The plugin's new SessionStart check replaces the old version-pinned symlink in `~/.local/bin` with a launcher that always runs the installed copy, and prints whatever `chrome-tab doctor` finds (PyObjC missing, PATH). If you would rather not wait for a session start:
