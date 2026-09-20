@@ -1,0 +1,7 @@
+{
+  "name": "zoom-scheduling",
+  "description": "Use when the user asks to schedule, set up, or add a Zoom meeting or Zoom call with someone (\"zoom with Iris tomorrow 2pm\", \"put a zoom link on my meeting with X\", \"cancel that zoom\"), from the terminal or a Slack bridge, or when a calendar event needs a Zoom link rather than Google Meet.",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}

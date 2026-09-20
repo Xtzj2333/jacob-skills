@@ -114,6 +114,11 @@
       "name": "chrome-tab",
       "source": "./plugins/chrome-tab",
       "description": "Use when opening an HTML file or URL in Chrome for the user on macOS — a rendered report, a local deliverable, any file:// page — or when the user asks which Chrome window something is in, or says pages open in the wrong window, jump the screen, or steal focus while they are working. macOS with Google Chrome only."
+    },
+    {
+      "name": "zoom-scheduling",
+      "source": "./plugins/zoom-scheduling",
+      "description": "Use when the user asks to schedule, set up, or add a Zoom meeting or Zoom call with someone (\"zoom with Iris tomorrow 2pm\", \"put a zoom link on my meeting with X\", \"cancel that zoom\"), from the terminal or a Slack bridge, or when a calendar event needs a Zoom link rather than Google Meet."
     }
   ]
 }
