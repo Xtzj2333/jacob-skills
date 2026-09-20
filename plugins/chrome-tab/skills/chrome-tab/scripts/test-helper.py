@@ -18,7 +18,8 @@ createWindow / tab / move are exercised against real tabs. It never touches the 
 Chrome: every AppleScript path is disabled for the run (CHROME_TAB_NO_APPLESCRIPT=1), and
 Chrome for Testing is a separate app that `tell application "Google Chrome"` doesn't reach.
 Point CHROME_TAB_TEST_BROWSER at the "Google Chrome for Testing" binary, or install one with
-`npx @puppeteer/browsers install chrome@stable --path <dir>` and set CHROME_TAB_TEST_BROWSER.
+`npx @puppeteer/browsers install chrome@stable --path ~/.cache/chrome-tab-test`, where both
+end-to-end suites find it without the variable.
 
 Run:  python3 scripts/test-helper.py
 """
@@ -297,14 +298,61 @@ class EndToEnd(unittest.TestCase):
         r2 = ct.helper_call("open", url=self.url("e"), windowId=wid)
         self.assertEqual((r2["action"], r2["tabId"]), ("reused", r1["tabId"]))
 
-    def test_05_looking_leaves_the_active_tab_alone(self):
+    def test_05_a_page_never_takes_over_the_tab_strip(self):
+        # 0.5.0, the user's call: which tab a window shows is theirs. A page opens in the
+        # background wherever they are — the old rule only protected the front window, so a
+        # page opened while they were in another window took over that window's tab strip,
+        # and that is what they came back to.
         wid = self.window_id()
-        r1 = ct.helper_call("open", url=self.url("f"), windowId=wid)          # now active
-        self.assertTrue(ct.helper_call("tab", tabId=r1["tabId"])["active"])
-        r2 = ct.helper_call("open", url=self.url("f"), windowId=wid, looking=True)
-        self.assertEqual(r2["action"], "added-beside")
-        self.assertTrue(ct.helper_call("tab", tabId=r1["tabId"])["active"])  # still their tab
-        self.assertFalse(ct.helper_call("tab", tabId=r2["tabId"])["active"])
+        theirs = ct.helper_call("open", url=self.url("f"), windowId=wid, select=True)["tabId"]
+        self.assertTrue(ct.helper_call("tab", tabId=theirs)["active"])
+        for looking in (False, True):     # wherever the user is, same answer
+            r = ct.helper_call("open", url=self.url("a") + f"?bg-{looking}", windowId=wid,
+                               looking=looking)
+            self.assertEqual(r["action"], "added")
+            self.assertFalse(ct.helper_call("tab", tabId=r["tabId"])["active"])
+            self.assertTrue(ct.helper_call("tab", tabId=theirs)["active"])
+            self.assertEqual(r["showing"], r["showingBefore"])     # the reply says so too
+            self.assertEqual(r["showing"], theirs)
+
+    def test_05b_select_is_the_opt_in(self):
+        wid = self.window_id()
+        theirs = ct.helper_call("open", url=self.url("b") + "?theirs", windowId=wid,
+                                select=True)["tabId"]
+        r = ct.helper_call("open", url=self.url("c") + "?shown", windowId=wid, select=True)
+        self.assertTrue(ct.helper_call("tab", tabId=r["tabId"])["active"])
+        self.assertFalse(ct.helper_call("tab", tabId=theirs)["active"])
+        self.assertNotEqual(r["showing"], r["showingBefore"])
+
+    def test_05c_a_new_group_does_not_change_the_shown_tab(self):
+        # Making a group moves the tab in the strip; measured 2026-09-20: it does not
+        # select it. The whole of "it jumped to the new tab" was the explicit select.
+        wid = self.window_id()
+        theirs = ct.helper_call("open", url=self.url("d") + "?theirs2", windowId=wid,
+                                select=True)["tabId"]
+        r = ct.helper_call("open", url=self.url("e") + "?grouped", windowId=wid,
+                           group="Proseminar", color="pink")
+        self.assertTrue(r["group"]["created"])
+        self.assertTrue(ct.helper_call("tab", tabId=theirs)["active"])
+        self.assertEqual(r["showing"], theirs)
+
+    def test_05d_reuse_leaves_the_shown_tab_alone(self):
+        # Re-rendering a page the user has open somewhere reloads it in place, but does not
+        # bring it forward; and when they are reading that very tab it isn't touched at all.
+        wid = self.window_id()
+        page = ct.helper_call("open", url=self.url("f") + "?reuse", windowId=wid)["tabId"]
+        theirs = ct.helper_call("open", url=self.url("a") + "?theirs3", windowId=wid,
+                                select=True)["tabId"]
+        again = ct.helper_call("open", url=self.url("f") + "?reuse", windowId=wid)
+        self.assertEqual((again["action"], again["tabId"]), ("reused", page))
+        self.assertTrue(ct.helper_call("tab", tabId=theirs)["active"])
+        self.assertEqual(again["showing"], theirs)
+        # now they are reading it: their copy is left untouched, the render goes beside it
+        ct.helper_call("open", url=self.url("f") + "?reuse", windowId=wid, select=True)
+        beside = ct.helper_call("open", url=self.url("f") + "?reuse", windowId=wid, looking=True)
+        self.assertEqual(beside["action"], "added-beside")
+        self.assertTrue(ct.helper_call("tab", tabId=page)["active"])
+        self.assertFalse(ct.helper_call("tab", tabId=beside["tabId"])["active"])
 
     def test_06_create_window_tab_and_move(self):
         before = {w["id"] for w in ct.helper_call("windows")}
@@ -329,7 +377,8 @@ class EndToEnd(unittest.TestCase):
         src = min(before)
         made = ct.helper_call("open", url=self.url("a") + "?group-move", windowId=src,
                               looking=True, group="Claude", color="orange")
-        dest = ct.helper_call("createWindow", url=self.url("b") + "?dest")["windowId"]
+        dest_win = ct.helper_call("createWindow", url=self.url("b") + "?dest")
+        dest, dest_showing = dest_win["windowId"], dest_win["tabId"]
         r = ct.helper_call("moveGroup", groupId=made["group"]["id"], windowId=dest)
         self.assertTrue(r["moved"])
         tab = ct.helper_call("tab", tabId=made["tabId"])
@@ -337,6 +386,8 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(tab["group"]["id"], made["group"]["id"])
         self.assertEqual((tab["group"]["title"], tab["group"]["color"]), ("Claude", "orange"))
         self.assertFalse(tab["active"])
+        # and the window it arrived in still shows the tab it did (measured 2026-09-20)
+        self.assertTrue(ct.helper_call("tab", tabId=dest_showing)["active"])
         # Recorded for the mover's design: did the tab report leaving its group on the way?
         print(f"\n    moveGroup groupId events during the move: {r['events']}", file=sys.stderr)
 
@@ -368,6 +419,27 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
         self.assertIn("group “CLI group”", out.stdout)
         self.assertIn("CLI group", self.groups(wid))
+        self.assertIn("in the background", out.stdout)
+
+    def test_07c_cli_open_leaves_the_shown_tab_alone(self):
+        wid = self.window_id()
+        theirs = ct.helper_call("open", url=self.url("b") + "?cli-theirs", windowId=wid,
+                                select=True)["tabId"]
+        out = subprocess.run([sys.executable, str(SCRIPT), "open", str(self.pages / "c.html"),
+                              "--window", str(wid), "--group", "CLI background"],
+                             env=self.env, capture_output=True, text=True)
+        if "AppleScript is disabled" in (out.stderr + out.stdout):
+            self.skipTest("this headless build doesn't answer Apple events by pid")
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        self.assertTrue(ct.helper_call("tab", tabId=theirs)["active"], out.stdout)
+        self.assertIn("still shows the tab it did", out.stdout)
+        # --select is the opt-in, and it says so
+        out = subprocess.run([sys.executable, str(SCRIPT), "open", str(self.pages / "d.html"),
+                              "--window", str(wid), "--group", "CLI background", "--select"],
+                             env=self.env, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        self.assertFalse(ct.helper_call("tab", tabId=theirs)["active"])
+        self.assertIn("as asked", out.stdout)
 
     @unittest.skipUnless(os.environ.get("CHROME_TAB_SLOW_TESTS"), "slow; set CHROME_TAB_SLOW_TESTS=1")
     def test_09_survives_idle_and_comes_back_after_the_host_dies(self):

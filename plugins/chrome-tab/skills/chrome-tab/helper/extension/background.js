@@ -121,30 +121,47 @@ const HANDLERS = {
   },
 
   // Open `url` in window `windowId`, reusing an open copy unless the user is reading it.
-  // This mirrors chrome-tab's place_tab(): `looking` means the user has this window in front
-  // right now. When they are looking, the tab they're on stays active and a new tab goes
-  // behind it. Otherwise the new or reloaded tab is left selected, so it's what they see
-  // when they come to the window. New tabs are always created inactive and only then
-  // selected, so nothing asks for the window to be shown.
-  async open({ url, windowId, group, color, reuse = true, looking = false, forceReload = false, noSelect = false }) {
+  //
+  // Which tab a window shows is the user's, never ours (0.5.0): tabs are created inactive
+  // and a reload doesn't select. `select` — chrome-tab's --select, implied by --activate —
+  // is the only way a page comes to the front. Before 0.5.0 a page opened while the user
+  // was in another window took over that window's tab strip, which is what they came back
+  // to; "sometimes it jumps to the new tab" was this.
+  //
+  // `looking` still matters for reuse: it means the user has this window in front right
+  // now, so an open copy of the page is left alone and the fresh render goes in a tab
+  // beside it — reloading would scroll them back to the top mid-read.
+  //
+  // The reply reports which tab the window showed before and after, so the caller can say
+  // "nothing switched" as a measurement instead of a promise.
+  async open({ url, windowId, group, color, reuse = true, looking = false, forceReload = false, select = false }) {
     if (!url) throw new Error("open: url is required");
     const win = await chrome.windows.get(windowId, { populate: true });
     const tabs = win.tabs || [];
+    const before = tabs.find((t) => t.active);
     const copy = reuse ? tabs.find((t) => sameUrl(t.url || t.pendingUrl || "", url)) : null;
     let tab;
     let action;
     if (copy && !(looking && copy.active && !forceReload)) {
       await chrome.tabs.reload(copy.id);
-      if (!looking && !noSelect && !copy.active) await chrome.tabs.update(copy.id, { active: true });
       tab = copy;
       action = "reused";
     } else {
       tab = await chrome.tabs.create({ windowId, url, active: false });
-      if (!looking) await chrome.tabs.update(tab.id, { active: true });
       action = copy ? "added-beside" : "added";
     }
     const g = group ? await putInGroup(tab.id, windowId, group, color) : null;
-    return { action, tabId: tab.id, windowId, group: g };
+    if (select) await chrome.tabs.update(tab.id, { active: true });
+    const showing = (await chrome.tabs.query({ windowId, active: true }))[0];
+    return {
+      action,
+      tabId: tab.id,
+      windowId,
+      group: g,
+      select,
+      showingBefore: before ? before.id : null,
+      showing: showing ? showing.id : null,
+    };
   },
 
   // A new unfocused window holding `url`. chrome-tab names it through AppleScript afterwards.

@@ -45,14 +45,15 @@ chrome-tab open report.html                       # the matching tab group, wher
 chrome-tab open report.html --group "mail archive"  # name the topic when the file's folder isn't it
 chrome-tab list                                   # windows by name, with their tab groups
 chrome-tab open report.html --window "educ"       # a window the user keeps or named (rare)
-chrome-tab open report.html --activate            # ...and bring Chrome forward
+chrome-tab open report.html --activate            # ...and bring Chrome forward, showing the page
+chrome-tab open report.html --select              # ...and show it in its window, Chrome left where it is
 chrome-tab name "#3" "mail archive"               # label an unnamed window
 chrome-tab home                                   # show the home window; `home NAME` sets it
 chrome-tab where 940163608                        # which window (and group) holds a tab
 chrome-tab move 940163608 --window "FE"           # move a tab for real (helper only)
 ```
 
-Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--color`, `--no-reuse`, `--force-reload`, `--no-select`, `--version`).
+Run `chrome-tab --help` for the rest (`--bind`, `--new-window`, `--color`, `--no-reuse`, `--force-reload`, `--version`).
 
 ## The two conventions that matter
 
@@ -74,7 +75,7 @@ The user loads it once. Open chrome://extensions, switch on Developer mode, clic
 - **What it changes.** Tabs are added in the background by the extension, with nothing asking macOS to bring Chrome forward. Window names are read from the Chrome that runs the helper, by process id. That means a headless copy of Chrome launched by another job can't answer in its place. Groups and a real `move` become possible. AppleScript's `move` closes the tab and opens a blank one.
 - **What it can't see.** Window names: the extension API has no field for them. `chrome-tab` reads them through Apple events and matches by id, and the ids are the same numbers on both sides.
 - **Without it.** Everything falls back to the AppleScript path above and says what it couldn't do.
-- **Tests.** `scripts/test-helper.py` and `scripts/test-cic-hook.py` run the real extension and host in a throwaway headless Chrome for Testing (set `CHROME_TAB_TEST_BROWSER`). Any browser launched for testing needs `--use-mock-keychain --password-store=basic`, or macOS puts a keychain password dialog in front of the user.
+- **Tests.** `scripts/test-helper.py` and `scripts/test-cic-hook.py` run the real extension and host in a throwaway headless Chrome for Testing (`CHROME_TAB_TEST_BROWSER`, or one under `~/.cache/chrome-tab-test/`). Any browser launched for testing needs `--use-mock-keychain --password-store=basic`, or macOS puts a keychain password dialog in front of the user. Changing the tool: `DEVELOPMENT.md` (files, state on disk, tests, releasing, Chrome facts).
 
 ## Claude-in-Chrome tabs beside the session's pages (optional hook)
 
@@ -87,11 +88,19 @@ Decisions are logged to `~/.claude/chrome-tab-helper/hook.log`.
 
 ## Nothing the user is looking at changes
 
-That is the rule the tool enforces (since 2026-09-03): not their app, not Chrome's window order, not the tab of a window they have in front, not whether a window is minimized. A page opens in the background and is there when they look. Concretely: if Chrome is frontmost and the target window is the one on top, a new tab is added *behind* the tab they are on and a reload doesn't switch tabs; otherwise the new or reloaded tab is left selected so it is what they see when they come to that window. A minimized target is re-minimized right after (Chrome un-minimizes it on navigation — measured). `--activate` is the explicit opt-out.
+That is the rule the tool enforces (since 2026-09-03): not their app, not Chrome's window order, not whether a window is minimized, and — since 0.5.0 — **not which tab any window is showing**. A page is always added in the background, inside its tab group, and waits there; the output names the window and the group so it can be found. A minimized target is re-minimized right after (Chrome un-minimizes it on navigation — measured).
+
+`--select` shows the page in its window; `--activate` does that *and* brings Chrome forward. Both are explicit opt-outs, for when the user asked to be taken to the page.
+
+Because a page never comes forward by itself, **say where it landed** when telling the user it's ready: the window and group from the output ("it's in *miscellaneous*, group *Proseminar*"). That clause is the difference between a page they can find and one they have to hunt for.
+
+Until 0.5.0 the rule protected only the window in front: a page opened while the user was in *another* window (or in another app, then walking into Chrome) was left selected there, so the tab strip they came back to had changed under them. That was the "sometimes it jumps to the new tab" the user reported on 2026-09-20. Creating the tab group is not what moved them — measured the same day, `tabs.group`, `tabGroups.move` and a background `tabs.create` all leave the shown tab alone; the one and only cause was the explicit select.
+
+The tool now measures it rather than promising it: the extension reports which tab the window showed before and after each open, and `open` prints "still shows the tab it did". If that ever comes back changed, the line is a bug report ("⚠ that window switched to this page on its own") and a `tab-switch` line goes to `~/.claude/chrome-tab-focus.log`.
 
 ## Re-opening a file that is already open
 
-It reloads that tab in place rather than piling up duplicates — **unless the user is reading it right now** (Chrome frontmost + that window on top + that tab active), in which case the new render opens in a tab behind their copy and their view is left alone.
+It reloads that tab in place rather than piling up duplicates, without bringing it forward — **unless the user is reading it right now** (Chrome frontmost + that window on top + that tab active), in which case the new render opens in a tab behind their copy and their view is left alone.
 
 Form state is never at risk either way: pages built with `decision-forms-html` persist to `localStorage` on every keystroke and restore on load. What a reload costs is scroll position and open `<details>`.
 

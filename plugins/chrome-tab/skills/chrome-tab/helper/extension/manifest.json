@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "chrome-tab helper",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Lets the chrome-tab command open pages in a chosen window and tab group, in the background, and move a tab between windows.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsj3R9LyxSRGj/T1LEhaEdr0szRvQqabJB/0lt97nyym+OW25vX6DoascGsfC9TwWnxJ+w8wYeHES6ItI6EEnLK6aY1dZjjA+FvxSxfr2/fUSfE+NstnVTked8LDE4xWxzdSaq/g5FlULJRUqS8G1bNMCVc2RwCp8kodjsBhnDk9dD/zfu/YJ8BOHnJYXFY5ZhQfAkXDburzxaPxoHF3c96oW7QnlLHX99tCA8Y20sZMVLZgY0+QktafZ3NsFYXmfwDzXPHMFJapqRM6rThjQnW3uOOS7CjKKmTMXJgkeR2RmjTTziTUqX7Zt2k/KuhxEar7smUmNLtabVH3kKHjm0wIDAQAB",
   "minimum_chrome_version": "120",

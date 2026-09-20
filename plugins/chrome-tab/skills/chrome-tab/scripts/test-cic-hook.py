@@ -247,8 +247,14 @@ class Decision(unittest.TestCase):
 
 
 def find_test_browser():
+    """Same search as test-helper.py: $CHROME_TAB_TEST_BROWSER, else ~/.cache/chrome-tab-test or ~/.cache/puppeteer."""
     env = os.environ.get("CHROME_TAB_TEST_BROWSER")
-    return env if env and Path(env).exists() else None
+    if env and Path(env).exists():
+        return env
+    for root in [Path.home() / ".cache" / "chrome-tab-test", Path.home() / ".cache" / "puppeteer"]:
+        for c in sorted(root.glob("**/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")):
+            return str(c)
+    return None
 
 
 BROWSER = find_test_browser()
@@ -323,6 +329,7 @@ class EndToEnd(unittest.TestCase):
         tab = ct.helper_call("tab", tabId=made["tabId"])
         self.assertEqual(tab["windowId"], dest)
         self.assertEqual(tab["group"]["id"], made["group"]["id"])   # the session's group id still holds
+        self.assertFalse(tab["active"])   # the window it lands in keeps showing its own tab
         # a second report of the same group does nothing
         again = subprocess.run([sys.executable, str(SCRIPT), "hook", "claude-in-chrome"], env=self.env,
                                input=json.dumps({"tool_name": "mcp__claude-in-chrome__tabs_context_mcp",

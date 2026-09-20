@@ -18,9 +18,10 @@ the second time ~0.4 s later; measured 2026-09-03 with Terminal in front: not at
 all), so a guard thread watches the frontmost app from *before* the navigation
 until 1.6 s after it and puts the user's app back within milliseconds each time
 Chrome takes it. The rule is: nothing the user is looking at changes — not
-their app, not Chrome's window order, not the active tab of a window they have
-in front, not whether a window is minimized. A new page opens in the
-background; it is there when the user looks.
+their app, not Chrome's window order, not whether a window is minimized, and
+(0.5.0) not which tab *any* window is showing. A page always opens in the
+background, in its tab group, and waits there; --select, implied by --activate,
+is the only way one comes to the front.
 
 Windows are addressed by their **given name** — the label you set with
 Chrome's right-click-the-tab-strip > "Name window…". Chrome exposes that as a
@@ -36,7 +37,9 @@ Usage
       --window NAME    target the window with this given name
       --group NAME     put it in the tab group NAME in that window (needs the helper)
       --new-window     make a fresh window (named via --window) — only when asked
-      --activate       bring Chrome forward (default: stay out of your way)
+      --activate       bring Chrome forward and show the page (default: stay out
+                       of your way)
+      --select         show the page in its window, without bringing Chrome forward
       --no-reuse       always add a tab, even if that URL is already open
       --bind           remember this window for the rest of the session
 
@@ -107,7 +110,7 @@ SESSION_ID = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get(
 
 CHROME_BID = "com.google.Chrome"
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # A PATH entry written by install.sh from a plugin cache starts with this line.
 LAUNCHER_MARK = "chrome-tab launcher (written by install.sh)"
@@ -1540,16 +1543,19 @@ def cmd_move(args):
         print(f"  ({what})")
 
 
-def place_tab(win_id, url, looking, args):
+def place_tab(win_id, url, looking, select, args):
     """Put `url` in window `win_id`, reusing an open copy unless the user is reading it.
 
     Returns one of: 'added' | 'reused' | 'added-beside'.
 
+    Which tab the window shows is left exactly as it was unless `select`
+    (--select, implied by --activate). AppleScript's `make new tab` selects the
+    tab it makes, so the previously active tab is put straight back; the
+    extension path never selects in the first place.
+
     `looking` means the user has this very window in front of them right now
-    (Chrome is the frontmost app and this is its front window). Then nothing
-    they see may change: a new tab goes *behind* the tab they are on, and a
-    reload does not switch tabs. Otherwise the new or reloaded tab is left
-    selected, so it is what they see when they next come to this window.
+    (Chrome is the frontmost app and this is its front window). It decides one
+    thing: whether an open copy may be reloaded under them.
 
     'added-beside' is the case where the page is already open AND it is the tab
     the user is looking at this second. Reloading would scroll them back to the
@@ -1566,7 +1572,7 @@ def place_tab(win_id, url, looking, args):
 
     def add():
         osa(ADD_SCRIPT, win_id, url)
-        if looking and active_idx > 0:
+        if not select and active_idx > 0:
             osa(SELECT_TAB_SCRIPT, win_id, active_idx)   # keep their tab in front
 
     if args.no_reuse or idx == 0:     # not open here yet
@@ -1577,9 +1583,23 @@ def place_tab(win_id, url, looking, args):
         add()
         return "added-beside"
 
-    select = not args.no_select and not looking
     osa(RELOAD_SCRIPT, win_id, str(idx), "1" if select else "0")
     return "reused"
+
+
+def check_switch(reply, select):
+    """Did this open change which tab the window shows, when it shouldn't have?
+
+    The helper reports the showing tab before and after (0.5.0). A True here is a
+    bug, not a style choice: the page took over a tab strip the user owns. Older
+    extensions don't send the fields — then there is nothing to measure, and the
+    caller says so instead of promising.
+    """
+    if not isinstance(reply, dict) or "showing" not in reply:
+        return None                      # extension older than this chrome-tab
+    if select:
+        return False
+    return reply.get("showing") != reply.get("showingBefore")
 
 
 FOCUS_LOG = Path.home() / ".claude" / "chrome-tab-focus.log"
@@ -1589,6 +1609,11 @@ def cmd_open(args):
     if args.new_window and not args.window:
         die("--new-window needs --window NAME, so the window can be found again")
     urls = [to_url(t) for t in args.targets]
+    # Showing the page is opt-in. Everything else opens in the background, in its
+    # group, and waits there: which tab a window shows belongs to the user.
+    select = args.select or args.activate
+    switched = []                       # per-url: did the window's shown tab change?
+    old_helper = False
     # Who is in front before we touch anything — the guard records it, and it is
     # measured again at the end so the closing line is a reading, not a promise.
     guard = FocusGuard(enabled=not args.activate)
@@ -1656,6 +1681,9 @@ def cmd_open(args):
             urls = urls[1:]
 
         was_minimized = bool(target.get("minimized"))
+        # `looking` decides one thing only: whether an open copy of this page may be
+        # reloaded under the user. Selection is not a function of where they are —
+        # since 0.5.0 a page never takes over a window's tab strip unless asked.
         looking = (chrome_is_front and target["id"] == visible_front
                    and not was_minimized and not args.activate)
         for u in urls:
@@ -1664,9 +1692,17 @@ def cmd_open(args):
                     r = helper_call("open", timeout=15, url=u, windowId=int(target["id"]),
                                     group=group, color=args.color, reuse=not args.no_reuse,
                                     looking=looking, forceReload=args.force_reload,
-                                    noSelect=args.no_select)
+                                    select=select)
                     if r:
                         results.append((u, r["action"], r.get("group")))
+                        switched.append(check_switch(r, select))
+                        if switched[-1] is None and not select and not old_helper:
+                            # 0.4.x picked selection from `looking`, so it still hands a
+                            # window over to the page. Say so, with the one-line fix.
+                            old_helper = True
+                            notes.append("the loaded helper extension is older than this "
+                                         "chrome-tab, so a page can still take over a window's "
+                                         "tab strip — run: chrome-tab helper install")
                         continue
                     notes.append("the helper stopped answering; AppleScript opened the rest")
                 except HelperError as e:
@@ -1675,7 +1711,7 @@ def cmd_open(args):
                                      "chrome-tab helper → Details, turn on “Allow access to file URLs”")
                     notes.append(f"the helper refused ({e}); AppleScript opened it")
                 bridge = False
-            results.append((u, place_tab(target["id"], u, looking, args), None))
+            results.append((u, place_tab(target["id"], u, looking, select, args), None))
             used_applescript = True
 
         navigated = created or any(a in ("added", "added-beside") for _, a, _ in results)
@@ -1734,8 +1770,29 @@ def cmd_open(args):
         print(f"✓ {' + '.join(bits) or 'nothing to do'} in {where}")
     if n("added-beside"):
         print("  (left your open copy untouched — pass --force-reload to override)")
-    elif looking and n("added"):
-        print("  (opened behind the tab you're reading — it's there when you switch)")
+    if select:
+        print("  (brought forward and shown, as asked)" if args.activate
+              else "  (shown in its window, as asked — --select)")
+    elif n("added") or n("added-beside") or n("reused"):
+        measured = [x for x in switched if x is not None]
+        if any(measured):
+            # The window changed what it was showing without being asked. Measured,
+            # not assumed, so this line is a bug report the user can act on.
+            print("  ⚠ that window switched to this page on its own — that is a chrome-tab "
+                  "bug; tell Claude")
+            try:
+                with FOCUS_LOG.open("a") as fh:
+                    fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  tab-switch  a page took over "
+                             f"the shown tab of “{label}” without --select\n")
+            except Exception:
+                pass
+        elif measured:
+            print(f"  (in the background — “{label}” still shows the tab it did)")
+        elif used_applescript:
+            # AppleScript selects the tab it makes; place_tab put theirs straight back.
+            print("  (in the background — the tab that window showed was put straight back)")
+        else:
+            print("  (in the background)")
     if groups:
         g = groups[-1]
         if plan["followed"]:
@@ -1945,12 +2002,15 @@ def main():
                                         "cyan", "orange"], help="colour for a new group")
     po.add_argument("--new-window", action="store_true",
                     help="make a new window (named via --window) — only when the user asks")
-    po.add_argument("--activate", action="store_true", help="bring Chrome forward")
+    po.add_argument("--activate", action="store_true",
+                    help="bring Chrome forward and show the page (implies --select)")
+    po.add_argument("--select", action="store_true",
+                    help="show the page in its window (default: it waits in the background)")
     po.add_argument("--no-reuse", action="store_true", help="never reload an existing tab")
     po.add_argument("--force-reload", action="store_true",
                     help="reload in place even if the user is currently reading that tab")
     po.add_argument("--no-select", action="store_true",
-                    help="reload without changing which tab the window shows")
+                    help=argparse.SUPPRESS)      # the default since 0.5.0; kept so old calls run
     po.add_argument("--bind", action="store_true", help="remember this window for the session")
     po.set_defaults(func=cmd_open)
 
