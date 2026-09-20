@@ -1,0 +1,7 @@
+{
+  "name": "opportunity-radar",
+  "description": "Use when someone wants a recurring automated sweep that finds opportunities for them — funding, fellowships, training programmes, internships, jobs, application deadlines — and delivers a digest to Slack or email on a schedule. Also when they say their radar missed something, want to change what it looks for, want to know whether it is still running, or want it paused. Triggers on \"set up an opportunity radar\", \"weekly digest of funding/internships\", \"it missed X\", \"why didn't it find\", \"is my radar still working\".",
+  "author": {
+    "name": "Jacob Zhang"
+  }
+}

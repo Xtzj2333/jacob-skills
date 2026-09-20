@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Opportunity radar — local fallback for accounts without cloud routines.
+  Runs the same prompt through `claude -p` on a schedule. It only fires while the Mac is awake,
+  which is a real downgrade from a cloud routine; say so before installing it.
+
+  Replace USERNAME, the prompt path, and the weekday/hour below.
+  StartCalendarInterval fires in LOCAL time, unlike a cloud cron, which is UTC.
+  Weekday: 0 or 7 = Sunday, 1 = Monday, … 5 = Friday.
+
+  The bot token is NOT in this file. The prompt reads ~/.radar_bot_token (chmod 600), so the
+  prompt's delivery block must say `$(cat ~/.radar_bot_token)` where the cloud version says
+  `$SLACK_BOT_TOKEN`. Note what that costs: the local session reads the token into its own context,
+  and therefore into its transcript. That breaks the rule the cloud path keeps. Say so before
+  installing this, and treat the transcript as sensitive afterwards.
+
+  --allowedTools is what keeps an unattended run from stalling at a permission prompt. It must
+  list every tool the prompt uses; `--permission-mode acceptEdits` is NOT enough, because it
+  auto-accepts edits only and the radar's delivery step is a Bash curl. Prefer this explicit list
+  over --dangerously-skip-permissions.
+
+  A local run uses the LOCAL MCP servers, not the claude.ai connectors the cloud prompt is written
+  against. If the prompt reads mail through a cloud connector, that step will not work here; either
+  wire an equivalent local server or cut the mail item and say so.
+
+  launchd runs a missed calendar job once at the next wake, so a sleeping Mac produces a digest at
+  an unpredictable hour rather than none at all — which matters, because the delivery design is
+  built around when the ping arrives. If the Mac is off or the user is logged out, the gui/ domain
+  is not loaded and nothing runs.
+
+  Install (the file must be named com.USERNAME.opportunity-radar.plist):
+    cp com.USERNAME.opportunity-radar.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.USERNAME.opportunity-radar.plist
+    launchctl kickstart -k gui/$(id -u)/com.USERNAME.opportunity-radar   # fires a REAL digest now
+  Remove (one command, no side effects):
+    launchctl bootout gui/$(id -u)/com.USERNAME.opportunity-radar && rm ~/Library/LaunchAgents/com.USERNAME.opportunity-radar.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.USERNAME.opportunity-radar</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>claude -p "$(cat ~/PROJECT/radar/prompt.txt)" --allowedTools Bash Read Write Edit Glob Grep WebSearch WebFetch</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>5</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key><false/>
+  <key>ProcessType</key><string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/Library/Logs/opportunity-radar.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/Library/Logs/opportunity-radar.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <!-- claude is often at ~/.local/bin/claude; check `which claude` and put its dir first. -->
+    <string>/Users/USERNAME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

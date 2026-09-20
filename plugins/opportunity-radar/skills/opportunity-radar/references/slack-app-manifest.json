@@ -1,0 +1,28 @@
+{
+    "display_information": {
+        "name": "Radar",
+        "description": "Weekly opportunity radar digests, sent by my Claude routine.",
+        "background_color": "#3a4b8a"
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "Radar",
+            "always_online": false
+        }
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "chat:write",
+                "chat:write.public",
+                "im:write"
+            ]
+        }
+    },
+    "settings": {
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "is_hosted": false,
+        "token_rotation_enabled": false
+    }
+}
