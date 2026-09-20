@@ -34,7 +34,7 @@ No config? Ask for the Zoom domain and the calendar, write the file, then carry 
    - Name any clash with their other events.
 3. **Create the Zoom meeting.**
    `python3 ~/.claude/skills/zoom-scheduling/scripts/zoom_js.py create --topic "Robin & Sam" --start "2026-09-19 15:15" --minutes 60 --tz America/Los_Angeles`
-   Then `tabs_context_mcp {createIfEmpty:true}`, navigate to `https://<zoom_domain>/meeting/schedule`, wait 3 s, and run the printed JS in `javascript_tool`, byte for byte. It returns `{ok, meetingNumber, joinLink, manageUrl}`.
+   Then `tabs_context_mcp {createIfEmpty:true}`, navigate to `https://<zoom_domain>/meeting/schedule`, wait 3 s, and check where you actually landed before running anything. **A first load that bounces to the SSO login page usually means the redirect is still in flight, not that they are signed out — navigate to the same URL a second time and wait again.** Only if the second load is still a login page is the session really gone. Once the page is `/meeting/schedule` and a `Save` button exists, run the printed JS in `javascript_tool`, byte for byte. It returns `{ok, meetingNumber, joinLink, manageUrl}`.
    Always pass `--tz`: a profile time zone left on the wrong continent silently shifts the meeting (one real account's still says Jakarta months after the trip).
 4. **Verify.** Open `https://<zoom_domain>/meeting/<meetingNumber>`. Its Time line must start with the output of `zoom_js.py expect --start "<same>"` and name the zone you meant. If it doesn't, delete the meeting and stop.
 5. **Draft it all, show it, and leave the other person untouched.** Until the user approves, nobody else sees anything: no invite email, no new event on their calendar, no edit to an event they are on.
@@ -52,7 +52,7 @@ No config? Ask for the Zoom domain and the calendar, write the file, then carry 
 | Symptom | Meaning | Do |
 |---|---|---|
 | No `mcp__claude-in-chrome__*` tools | The session has no browser (a headless run started without `--chrome`) | Say so; the meeting can't be made here. Offer a standing personal link from `private_notes` only if they agree. |
-| `not on the schedule page`, or a login page | Signed out of Zoom | Ask them to sign in (SSO and 2FA are theirs to do). Nothing was created. |
+| `not on the schedule page`, or a login page | Mid-SSO redirect, or really signed out | **Load the schedule URL once more first** — a live CalNet session often bounces on the first hit and goes straight through on the second (seen 2026-09-19). Still a login page after the retry: ask them to sign in (SSO and 2FA are theirs to do). Nothing was created either way. |
 | `no Save button yet` | The form was still loading | Wait 3 s and rerun the same JS once. |
 | `Zoom changed its schedule form…`, or any other error | The portal changed | Nothing was created. Tell them. Capture one real Save click with `read_network_requests` and update `create.js`. |
 
