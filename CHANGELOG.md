@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-09-20 — `chrome-tab` 0.5.0: a page never takes over a window's tab strip
+
+**TL;DR:** `claude plugin update chrome-tab@jacob-skills`, then — if you run the helper extension —
+`chrome-tab helper install`, which copies the new files in and asks the extension to reload itself (no click).
+Nothing else changes.
+
+**What was wrong.** The rule "nothing you're looking at changes" only ever protected the Chrome window that was
+in front. Any other case counted as "away", and the page was left *selected* in its target window so it would be
+showing when you next went there. If you were working in a different Chrome window — the common case, since
+pages land in whichever window holds their tab group — the tab strip you came back to had changed under you.
+
+**What it is now.** Which tab a window shows is yours. A page is added in the background, inside its tab group,
+and waits there, whatever app or window you are in. `--select` shows it in its window, `--activate` does that
+*and* brings Chrome forward; those are the only ways a page comes to the front. `--no-select` is the default now
+(still accepted, hidden from `--help`).
+
+**Measured, not assumed.** In a throwaway Chrome with the real extension: `tabs.create({active:false})`,
+`tabs.group()` making a brand-new group, `tabGroups.update()` and `tabGroups.move()` into another window all
+leave every window showing the tab it showed — only an explicit `tabs.update({active:true})` moves you. So
+grouping was never the culprit, and neither was the Claude-in-Chrome mover hook. The extension now reports the
+window's shown tab before and after each open, so `open` prints "(in the background — 'X' still shows the tab it
+did)"; if it ever changes without `--select` you get a ⚠ line and a `tab-switch` entry in
+`~/.claude/chrome-tab-focus.log`. A 0.5.0 command talking to a 0.4.x extension still selects, and says so with
+the one-line fix.
+
+**Because a page never comes forward, say where it landed.** The skill now tells Claude to name the window and
+the group ("it's in *miscellaneous*, group *Proseminar*") when it tells you a page is ready.
+
+Also in this release: `DEVELOPMENT.md` (file map, how a page gets placed, the hook's decision path, state on
+disk, how to test without touching your own Chrome, release steps, and the Chrome facts that each took a day to
+learn) ships with the plugin for the first time.
+
 ## 2026-09-17 — `chrome-tab` 0.4.0: no more window per topic; tab groups, a real tab move and a quiet open path via an optional helper extension; Claude-in-Chrome tabs placed beside the session's pages
 
 **TL;DR for anyone on the plugin:** `claude plugin update chrome-tab@jacob-skills`. Nothing else is required: without the helper you get 0.2.0's behaviour (below) and everything still works over AppleScript. The helper and the hook are opt-in, each one command plus, for the extension, one click in `chrome://extensions`.

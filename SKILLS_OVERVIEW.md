@@ -342,7 +342,8 @@ chrome-tab open report.html                    # the matching tab group, whereve
 chrome-tab open report.html --group "mail archive"  # name the topic when the file's folder isn't it
 chrome-tab list                                # windows by name, with their tab groups
 chrome-tab open report.html --window "educ"    # a window you keep or named (rare)
-chrome-tab open report.html --activate         # ...and bring Chrome forward
+chrome-tab open report.html --activate         # ...and bring Chrome forward, showing the page
+chrome-tab open report.html --select           # ...and show it in its window, Chrome left where it is
 chrome-tab name "#3" "mail archive"            # label an unnamed window
 chrome-tab home                                # show the home window; `home NAME` sets it
 ```
@@ -355,7 +356,9 @@ chrome-tab home                                # show the home window; `home NAM
 
 **Claude-in-Chrome tabs beside the session's pages (optional hook).** `scripts/install-cic-hook.py` (you run it) adds a PostToolUse hook that moves a brand-new Claude-in-Chrome session group right after the group this session's pages went to, else into the home window. Needs the helper.
 
-**Re-opening a file that's already open** reloads that tab in place instead of piling up duplicates — unless you're reading it right now (Chrome frontmost + that window on top + that tab active), in which case the new render opens beside your copy and your view is left alone.
+**A page never takes over a window's tab strip (0.5.0).** Which tab a window shows is yours: a page is added in the background, in its tab group, and waits there, whatever app or window you're in. `--select` shows it in its window and `--activate` also brings Chrome forward — the only two ways a page comes to the front. Before 0.5.0 the rule protected only the window in front, so a page opened while you were in another Chrome window was left selected there. The extension reports the shown tab before and after each open, so the command prints "(in the background — 'X' still shows the tab it did)" as a measurement, and flags it as a bug if it ever changed. Because nothing comes forward, Claude is told to name the window and group when it says a page is ready.
+
+**Re-opening a file that's already open** reloads that tab in place instead of piling up duplicates, without bringing it forward — unless you're reading it right now (Chrome frontmost + that window on top + that tab active), in which case the new render opens beside your copy and your view is left alone.
 
 **Optional guard hook.** `scripts/install-hook.py` adds a `PreToolUse`/`Bash` hook that refuses `open <file>.html` and names the replacement, so the habit can't survive a session that never read this skill. It short-circuits in shell (~3.6 ms) unless the command contains "open" at all, and ignores `open -a`/`-b`, folders, PDFs, `openssl`, and `chrome-tab open` itself. `--remove` undoes it; it backs up `settings.json` first. **It registers your own machine's path** — don't copy Jacob's hook entry out of a snapshot.
 
