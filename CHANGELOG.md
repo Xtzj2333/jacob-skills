@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-30 — `chrome-tab` 0.6.0: pages find the project's window
+
+**TL;DR:** `claude plugin update chrome-tab@jacob-skills`. No helper reinstall: the extension didn't change.
+
+**What was wrong.** With no matching tab group, a page went to the home window even when a window named for the
+project was open (a window "FE" for a folder "Free Expression"). Claude-in-Chrome's browsing tabs did the same:
+a session that hadn't opened a page yet had its browsing group carried out of that window into the home window.
+
+**What it is now.** Before the home window, chrome-tab looks for an open window named for a folder the file or
+session sits in: its exact name, or its initials in capitals ("FE" ⇔ "Free Expression"). Initials also count
+when matching tab groups.
+
+**Shorter skill.** SKILL.md is cut by about 70% (it loads in full every time the skill fires); the history and
+implementation detail moved to `DEVELOPMENT.md`.
+
 ## 2026-09-20 — `chrome-tab` 0.5.0: a page never takes over a window's tab strip
 
 **TL;DR:** `claude plugin update chrome-tab@jacob-skills`, then — if you run the helper extension —
