@@ -162,8 +162,8 @@ class Decision(unittest.TestCase):
             return {"moved": True, "events": [{"tabId": self.tab["id"], "groupId": -1}]}
         raise AssertionError(cmd)
 
-    def claim(self, resp=NEW_GROUP, tool="mcp__claude-in-chrome__tabs_context_mcp", session="sess-1"):
-        return ct.claim_claude_tab({"tool_name": tool, "tool_response": resp, "session_id": session})
+    def claim(self, resp=NEW_GROUP, tool="mcp__claude-in-chrome__tabs_context_mcp", session="sess-1", cwd=None):
+        return ct.claim_claude_tab({"tool_name": tool, "tool_response": resp, "session_id": session, "cwd": cwd})
 
     def bind(self, session, window, group):
         ct.STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -183,6 +183,10 @@ class Decision(unittest.TestCase):
         msg = self.claim()
         self.assertEqual(self.moves(), [{"groupId": 1933887913, "windowId": 33, "afterGroupId": 601}])
         self.assertIn("beside this session's “FE4” group", msg)
+
+    def test_no_page_yet_goes_to_the_projects_window(self):
+        self.claim(cwd=str(Path.home() / "Claude/Lab/Free Expression/.claude/worktrees/x"))
+        self.assertEqual(self.moves()[0]["windowId"], 33)
 
     def test_topic_group_in_a_closed_window_falls_back_to_home(self):
         self.bind("sess-1", "Wispr Flow", "Wispr Flow")

@@ -2,7 +2,7 @@
 
 `SKILL.md` is for using the tool. This file is for changing it: what each file does, where the
 tool keeps state, how to test without touching the user's Chrome, how to release, and the facts
-about Chrome that took a day each to learn. Current version: 0.5.0 (2026-09-20).
+about Chrome that took a day each to learn. Current version: 0.6.0 (2026-09-30).
 
 ## Files
 
@@ -11,7 +11,7 @@ about Chrome that took a day each to learn. Current version: 0.5.0 (2026-09-20).
 | `scripts/chrome-tab` | The whole CLI: one Python 3 file, stdlib only (PyObjC optional, for the fast focus guard). `__version__` is near the top. |
 | `helper/extension/` | The helper extension (Manifest V3; `tabs`, `tabGroups`, `nativeMessaging`, `alarms`). `background.js` holds `HANDLERS`: `ping`, `windows`, `open`, `createWindow`, `tab`, `move`, `moveGroup`, `reload`. Its id, `fjfhflgjjbjjlkbfhjegbnbommoiffie`, is fixed by the public `key` in `manifest.json`. It's loaded unpacked, so no private key exists or is needed. |
 | `helper/chrome_tab_host.py` | The native-messaging host that Chrome starts for the extension. It relays between Chrome (stdin/stdout, 4-byte length + JSON) and a Unix socket (one JSON line in, one out). It answers `host` itself: its own pid, and Chrome's pid, which is its parent because the launcher `exec`s it. Nothing but framed messages may go to stdout. |
-| `scripts/install.sh`, `scripts/session-check.sh` | PATH install: a symlink from a source checkout, a launcher from a plugin cache (see SKILL.md). `session-check.sh` is the plugin's SessionStart hook. |
+| `scripts/install.sh`, `scripts/session-check.sh` | PATH install: a symlink from a source checkout, a launcher from a plugin cache (see Background below). `session-check.sh` is the plugin's SessionStart hook. |
 | `scripts/install-hook.py`, `scripts/block-bare-open.{sh,py}` | Optional PreToolUse/Bash guard that refuses bare `open <file>.html`. |
 | `scripts/install-cic-hook.py` | Optional PostToolUse hook for the Claude-in-Chrome mover (`chrome-tab hook claude-in-chrome`). The user runs it because it edits `settings.json`, and it backs that file up first. `--remove` undoes it. |
 | `scripts/restore-focus.*`, `install-focus-hook.py`, `focus-log-report.py`, `focus-probe.sh`, `focus-regression.py` | The Aug–Sep 2026 focus-steal instruments. Retired: recommended off since 2026-09-03 and kept as the record. |
@@ -22,13 +22,13 @@ about Chrome that took a day each to learn. Current version: 0.5.0 (2026-09-20).
 `cmd_open` asks the helper for its host facts (`helper_host`). If the helper answers, window names are read by Chrome's pid (`list_windows(pid)`, JXA `Application(pid)`) and the window/group list comes from the extension (`helper_call("windows")`). Then:
 
 1. `topic_name()`: `--group`, else the `--window` name given on this call, else the session's remembered group, else the file's project folder (`project_of`: the parent of `reports (claude)/`, or `~/Claude/reports/<topic>/`), else the current folder, else "Claude pages".
-2. `plan_placement()` (pure; `test-target.py` pins it) matches the topic against every window's groups with `group_score()`. A score of 2 means the same words. A score of 1 means every word of the shorter name, with at least four letters, starts a word of the longer one. Short names match only exactly, and Claude-in-Chrome's groups (`CIC_GROUP`) never match. A hit wins in whichever window it lives; ties go to the home window, then the session's last window. With no hit, the page gets a new group named after the topic, in the `--window` target or else the home window.
+2. `plan_placement()` (pure; `test-target.py` pins it) matches the topic against every window's groups with `group_score()`. A score of 2 means the same words. A score of 1 means every word of the shorter name, with at least four letters, starts a word of the longer one. Short names match only exactly or as the other name's initials (`is_initials`: "FE" ⇔ "Free Expression"), and Claude-in-Chrome's groups (`CIC_GROUP`) never match. A hit wins in whichever window it lives; ties go to the home window, then the session's last window. With no hit, the page gets a new group named after the topic, in the `--window` target, else the window named for a folder the file or cwd sits in (`project_window`: exact name or initials only), else the home window.
 3. The helper's `open` adds or reloads the tab and puts it in the group (`putInGroup`). The tab is created inactive and **nothing selects it** (0.5.0): `select` — `--select`, implied by `--activate` — is the only path that does. `looking` (Chrome frontmost *and* this is its front window) now decides one thing only: whether an open copy may be reloaded under the user, or whether the fresh render goes in a tab beside it (`added-beside`). The reply carries `showingBefore`/`showing`, the window's shown tab either side of the call; `check_switch()` turns that into the printed "still shows the tab it did", a `tab-switch` line in the focus log if it ever changed, and a "run chrome-tab helper install" note when the loaded extension is too old to report it. Without the helper, the AppleScript path puts the page in the window only, the output says groups were skipped, and since `make new tab` selects what it makes, `place_tab` puts the previously shown tab straight back.
 4. `write_binding()` records the session's window and group, which is what the next flagless open and the Claude-in-Chrome hook read.
 
 ## The Claude-in-Chrome hook
 
-`cmd_hook` runs as a PostToolUse hook whose matcher lists three tools (`tabs_context_mcp`, `navigate`, `browser_batch`), so Claude Code starts it for nothing else. `fresh_groups()` finds a brand-new session group in any of the three result shapes: `tabs_context_mcp`'s JSON block, the block appended to a `navigate` without a tab id, or `[tabs_context_mcp] {…}` lines in a batch. `claim_claude_tab()` then applies the guardrails: only a group this call reported, holding exactly that one tab, once (`moved.json`, 7 days), never an active tab, never a new window. `browse_target()` picks the window of the session's remembered group and anchors right after that group; otherwise it picks the browse window, which defaults to the home window. The move is `moveGroup` with `afterGroupId`, followed by a poll until the tab sits in a group in the target window again. Every decision goes to `hook.log`.
+`cmd_hook` runs as a PostToolUse hook whose matcher lists three tools (`tabs_context_mcp`, `navigate`, `browser_batch`), so Claude Code starts it for nothing else. `fresh_groups()` finds a brand-new session group in any of the three result shapes: `tabs_context_mcp`'s JSON block, the block appended to a `navigate` without a tab id, or `[tabs_context_mcp] {…}` lines in a batch. `claim_claude_tab()` then applies the guardrails: only a group this call reported, holding exactly that one tab, once (`moved.json`, 7 days), never an active tab, never a new window. `browse_target()` picks the window of the session's remembered group and anchors right after that group; otherwise the window named for the session's cwd (`project_window`), then the browse window, which defaults to the home window. The move is `moveGroup` with `afterGroupId`, followed by a poll until the tab sits in a group in the target window again. If the target window isn't open, the tab stays where it is and the session is told in one line. Every decision goes to `hook.log`.
 
 ## State on disk
 
@@ -68,6 +68,81 @@ Rules for any browser you launch while testing:
 4. On a machine where the helper is loaded, `chrome-tab helper install` copies the new files and asks the running extension to reload itself, with no click. `chrome-tab helper status` should then show the new version running.
 5. Publish to the marketplace (the author's `jacob-skills`). Sync the skill folder, then on the marketplace side bump `plugins/chrome-tab/.claude-plugin/plugin.json` and add a CHANGELOG entry written for someone who only runs `claude plugin update`. Touch `SKILLS_OVERVIEW.md` and the README when behaviour changed. The plugin's `hooks/hooks.json` registers only the SessionStart check. The Claude-in-Chrome hook stays opt-in, because it only makes sense with the helper loaded.
 6. Keep this folder's wording generic ("the user"), because the marketplace copy is public.
+
+## Background moved out of SKILL.md (0.6.0)
+
+On 2026-09-30 SKILL.md was cut to what a session needs to use the tool (about 3,800 → 1,150 tokens per
+load). The history and detail it carried are kept here, verbatim, except where a section above already
+says the same thing.
+
+### Why not `open`
+
+`open file.html` has three faults on macOS: it hands the file to whichever Chrome window was used *last*, it pulls Chrome in front of whatever the user was doing, and the tab carries no marker of which session opened it. `open -g` does **not** fix the focus steal — Chrome activates itself regardless (measured).
+
+`chrome-tab` drives Chrome's AppleScript interface instead, which can add a tab to a *named* window without calling `activate`. With its optional **helper extension** running, it does the navigating through the extension API instead: tab groups, a real tab move, and no request to raise Chrome at all.
+
+### Install from a plugin cache
+
+The install line in SKILL.md sorts with `sort -V | tail -1` because the glob can match two version directories after an update, and `sh` would run the first.
+
+From a plugin cache the installer writes a *launcher*, not a symlink: it runs whichever copy
+Claude Code has installed (`installed_plugins.json`), so after this one run
+`claude plugin update chrome-tab@jacob-skills` is all a later update needs. Before 0.1.3 the PATH
+entry was a symlink into the versioned cache directory, so an update reported success while the
+old copy kept running (Tony, Sep 2026: 0.1.2 sat unused for two weeks). `chrome-tab doctor`
+reports that state as STALE, and a stale copy hands over to the installed one by itself.
+
+**PyObjC** makes the focus guard fast — 3 ms polls and an in-process re-activation. It ships
+with Anaconda's python, not with Apple's or Homebrew's; without it the guard still works but
+polls every 50 ms via `lsappinfo` + `open -b`, so a jump can show for a frame or two. `doctor`
+prints the exact `pip install` line for whichever `python3` runs the tool (Homebrew's needs
+`--break-system-packages`), and `open` says so on every run that took the slow path.
+
+### Placement history
+
+Until 0.2.0 an unknown `--window` name made a brand-new window: 76 of them in five weeks on one Mac.
+
+### Nothing the user is looking at changes
+
+That is the rule the tool enforces (since 2026-09-03): not their app, not Chrome's window order, not whether a window is minimized, and — since 0.5.0 — **not which tab any window is showing**. A page is always added in the background, inside its tab group, and waits there; the output names the window and the group so it can be found. A minimized target is re-minimized right after (Chrome un-minimizes it on navigation — measured).
+
+Until 0.5.0 the rule protected only the window in front: a page opened while the user was in *another* window (or in another app, then walking into Chrome) was left selected there, so the tab strip they came back to had changed under them. That was the "sometimes it jumps to the new tab" the user reported on 2026-09-20. Creating the tab group is not what moved them — measured the same day, `tabs.group`, `tabGroups.move` and a background `tabs.create` all leave the shown tab alone; the one and only cause was the explicit select.
+
+### The guard hook
+
+`scripts/install-hook.py` adds a `PreToolUse`/`Bash` hook that refuses `open <file>.html` and names the replacement, so the habit can't survive a session that never read this skill. It exits in shell (~3.6 ms) unless the command contains "open" at all. It ignores `open -a`/`-b`, folders, PDFs, `openssl`, and `chrome-tab open`. `--remove` undoes it; it backs up `settings.json` first.
+
+### AppleScript focus (the path without the helper)
+
+Setting a tab's URL by AppleScript *asks* macOS to bring Chrome forward — new window or existing one, twice, the second time ~0.4 s later (creating an empty tab and reloading do not). Whether macOS grants it depends on the user: measured 2026-08-20 (user idle 200+ s, Slack in front) it was granted every time; measured 2026-09-03 (user had touched the keyboard 3–20 s earlier) it was never granted, and neither was an `open -b` from the tool. So the flash happens when the user is reading, not typing. The tool cannot prevent the request; it undoes it: a guard thread (PyObjC, 3 ms poll, in-process re-activation; falls back to `lsappinfo` + `open -b`) runs from before the navigation until 1.6 s after and puts the user's app back the instant Chrome appears. Until 2026-09-03 the loop was 100 ms polling + `open -b` *after* the call, i.e. a visible 100–400 ms blink twice per page — that was the "takes me there and back" the user reported. The closing lines are measurements: how many times Chrome came forward and for how long, plus "(focus left where it was)"; anything else is a bug report, and a `guard` line goes to `~/.claude/chrome-tab-focus.log` whenever Chrome came forward at all. The helper extension (above) is that path with *no* request: with it running, pages are added by the extension and the guard only measures.
+
+Regression check without a human at the keyboard: `scripts/focus-regression.py` waits until the user has been idle 4 min, then runs the raw navigations and the real tool on every path (needs PyObjC and Slack; aborts the moment the idle clock drops). It still needs the user's fresh consent to run — see the `ask-before-taking-the-screen` rule.
+
+### Retired: restore-focus hooks (recommended off since 2026-09-03)
+
+**Verdict 2026-09-03:** remove them (`scripts/install-focus-hook.py --remove`, run by the user — done on this Mac 2026-09-03 02:22). They answered their question on 2026-08-20 (the extension never moves focus). Left installed, their only remaining effect was on the user: five `RESTORED` firings 27 Aug–1 Sep, every one within a minute of a `chrome-tab open` in the same session — the user had walked into Chrome to read the page just opened, and the Stop hook "restored" them to the app they had been in before. The rest of this section is the history.
+
+`scripts/install-focus-hook.py` adds a second, separate pair: `PreToolUse` on
+`mcp__claude-in-chrome__.*` records where the user was before Claude browses, and `Stop` puts them
+back — app, Chrome window, and tab index. It acts only when it is confident (nothing to undo if the
+user isn't in Chrome at end of turn, or was already in Chrome when Claude started); every decision is
+logged under `CHROME_TAB_FOCUS_DEBUG=1`.
+
+**Status: unproven.** Measured 2026-08-15 on a quiet machine, no browser operation stole focus at all
+— not tab-group creation, navigation, or screenshots. Earlier readings that suggested otherwise were
+contaminated by the user's own clicking. So install it as an *instrument* (does the steal ever happen
+in real use?) rather than as a known fix. It cannot distinguish "the extension pulled you into Chrome"
+from "you walked into Chrome yourself", so it will occasionally put you back when you didn't want it.
+
+A `RESTORED` in the log is a **candidate**, not a finding: anything else that drives app focus —
+another session's AppleScript `activate`, `open -a`, a screen recorder, or `chrome-tab` itself —
+produces the same line. `scripts/focus-log-report.py` checks each RESTORED against the session
+transcripts for exactly that and says whether it is admissible. The one catch so far (2026-08-16)
+turned out to be `chrome-tab`'s own add-tab path, fixed 2026-08-20 — the extension has never been
+seen to move focus across two controlled runs (`scripts/focus-probe.sh` is the probe used).
+
+A `restore-focus.sh` wrapper exits in ~5.7 ms when no snapshot is pending — worth having because the
+`Stop` half has no matcher and so runs on every turn of every session.
 
 ## Facts that took a day each to learn
 

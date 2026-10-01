@@ -92,6 +92,11 @@ class Matcher(unittest.TestCase):
         self.assertEqual(ct.group_score("to do", "todo"), 0)
         self.assertEqual(ct.group_score("Home Office", "Furnitures"), 0)
 
+    def test_initials(self):
+        self.assertEqual(ct.group_score("FE", "Free Expression"), 1)
+        self.assertEqual(ct.group_score("fe", "Free Expression"), 0)    # lower case is a word
+        self.assertEqual(ct.group_score("FE", "Furnitures"), 0)
+
     def test_claude_in_chrome_groups_never_match(self):
         for title in ("Claude", "✅Claude", "⌛Claude", "Claude (MCP)"):
             self.assertEqual(ct.group_score("Claude", title), 0)
@@ -165,6 +170,16 @@ class Placement(unittest.TestCase):
     def test_named_window_with_no_group_gets_a_group_named_after_it(self):
         p = self.plan(wanted="Happiness Study")
         self.assertEqual((p["window"]["given_name"], p["group"], p["group_new"]), ("Happiness Study", "Happiness Study", True))
+
+    def test_new_group_goes_to_the_projects_window(self):
+        h = Path.home()
+        p = ct.plan_placement(WINDOWS, EXT, None, "rerun", None, [], HOME,
+                              cwd=str(h / "Claude/Lab/Free Expression/.claude/worktrees/x/analysis"))
+        self.assertEqual((p["window"]["given_name"], p["group"]), ("FE", "rerun"))
+        # a parent folder never matches loosely
+        wins = WINDOWS + [win(8, "Berkeley funding")]
+        p = ct.plan_placement(wins, EXT, None, "talks2", None, [], HOME, cwd=str(h / "Claude/Berkeley/seminars"))
+        self.assertEqual(p["window"]["given_name"], HOME)
 
     def test_session_memory_reuses_the_group(self):
         b = {"window_name": "miscellaneous", "group": "chrome-tab"}

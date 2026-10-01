@@ -110,7 +110,7 @@ SESSION_ID = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get(
 
 CHROME_BID = "com.google.Chrome"
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 # A PATH entry written by install.sh from a plugin cache starts with this line.
 LAUNCHER_MARK = "chrome-tab launcher (written by install.sh)"
@@ -909,7 +909,36 @@ def group_score(name, title):
     if all(len(t) >= 4 and any(len(u) >= 4 and (u.startswith(t) or t.startswith(u)) for u in long_)
            for t in short):
         return 1
+    if is_initials(name, title) or is_initials(title, name):
+        return 1
     return 0
+
+
+def is_initials(short, full):
+    """"FE" for "Free Expression": a name in capitals that spells the other's initials."""
+    short, words = (short or "").strip(), norm_words(full)
+    return short.isalpha() and short.isupper() and len(words) > 1 and \
+        short.lower() == "".join(w[0] for w in words)
+
+
+def project_window(paths, windows):
+    """The open window named for a folder one of `paths` sits in, innermost first.
+
+    Its exact name or its initials, never a loose match: a parent folder like
+    "Berkeley" is too broad to claim a window.
+    """
+    for path in paths:
+        if not path or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", path) and not path.startswith("file:"):
+            continue
+        p = Path(urllib.parse.unquote(path[7:]) if path.startswith("file://") else path).expanduser().resolve()
+        for d in [p, *p.parents]:
+            if Path.home() not in d.parents:
+                break
+            name = FLAG_SUFFIX.sub("", d.name).strip()
+            for w in windows:
+                if w["given_name"] and (group_score(name, w["given_name"]) == 2 or is_initials(w["given_name"], name)):
+                    return w
+    return None
 
 
 def find_group(topic, ext_windows, prefer=()):
@@ -1041,7 +1070,7 @@ def plan_placement(windows, ext, wanted, explicit_group, binding, targets, home,
         plan.update(window=win, group=title,
                     followed=(target is None and (home_w is None or wid != home_w["id"])))
     else:
-        win = target or home_w
+        win = target or project_window(list(targets or []) + [cwd or os.getcwd()], windows) or home_w
         plan.update(window=win, create_name=None if win else home, group=topic, group_new=True)
     if plan["window"] is not None:
         plan["others"] = [g["title"] for g in (by_id.get(plan["window"]["id"], {}).get("groups") or [])
@@ -1303,6 +1332,9 @@ def browse_target(event, windows, ext):
                 if str(x["id"]) == w["id"]:
                     gid = next((g["id"] for g in x.get("groups") or [] if g["title"] == b["group"]), None)
             return w, gid, f"beside this session's “{b['group']}” group in “{w['given_name']}”"
+    w = project_window([event.get("cwd")], windows)
+    if w:
+        return w, None, f"into “{w['given_name']}”, the window for this session's folder"
     name = browse_window_name()
     w = next((w for w in windows if w["given_name"].lower() == name.lower()), None)
     return w, None, f"into the “{name}” window"
