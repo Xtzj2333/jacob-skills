@@ -1,11 +1,11 @@
 ---
 name: calendar-search
-description: "Search Jacob's Google Calendar, and make every change to it — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', AND whenever he asks to add, schedule, book, move, reschedule or update anything, says he'll miss / skip / isn't going to something (that is a recolour to graphite, never a delete), or simply pastes an announcement or email subject and expects it handled. His events span ~13 calendars (renamed 2026-07-31 — no more 'UChicago' prefix) and are often titled in Chinese, so the naive one-calendar keyword search silently misses them — which is also how a second copy of an event he already has gets created. Search before every write. Not for to-do operations: that's jacob-todos."
+description: "Search Jacob's Google Calendar, and make every change to it — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', AND whenever he asks to add, schedule, book, move, reschedule or update anything (someone's birthday included), says he'll miss / skip / isn't going to something (that is a recolour to graphite, never a delete), or simply pastes an announcement or email subject and expects it handled. His events span ~13 calendars (renamed 2026-07-31 — no more 'UChicago' prefix) and are often titled in Chinese, so the naive one-calendar keyword search silently misses them — which is also how a second copy of an event he already has gets created. Search before every write. Not for to-do operations: that's jacob-todos."
 ---
 
 # Calendar Search
 
-Jacob's calendar is bCal — his Berkeley Google account — spread across ~13 calendars. Ten of them are static imports made before his UChicago account closed on 2026-07-26 — they are his and writable. They carried a `UChicago — ` prefix until 2026-07-31, when it was dropped; only the two genuinely finished ones still say so, as `SONA Schedule (UChicago, archived)` and `Potentials Lab (UChicago, archived)`. Renaming did not change their IDs. Anything created since lands on the primary.
+Jacob's calendar is bCal — his Berkeley Google account — spread across ~13 calendars. Ten of them are static imports made before his UChicago account closed on 2026-07-26 — they are his and writable. They carried a `UChicago — ` prefix until 2026-07-31, when it was dropped; only the two genuinely finished ones still say so, as `SONA Schedule (UChicago, archived)` and `Potentials Lab (UChicago, archived)`. Renaming did not change their IDs. Anything created since lands on the primary — except birthdays, which have their own home (see [Birthdays](#birthdays)).
 
 Two things make the obvious search fail, and this skill exists because of them: most events aren't on the primary calendar, and the API's `fullText` filter doesn't reliably match Chinese titles. Get those two right and the rest is bookkeeping.
 
@@ -64,7 +64,7 @@ Re-fetch with `list_calendars` every time — IDs can rotate. Canonical IDs live
 |---|---|---|
 | the primary (his bCal account) | everything created after July 2026 | |
 | `Events` | old primary: personal to-dos, reminders, fixed events | |
-| `Really Important Tasks` | high-priority one-offs; deadlines, payments, renewals | chunk |
+| `Really Important Tasks` | high-priority one-offs; deadlines, payments, renewals; **birthdays** (yearly, all-day) | chunk |
 | `Optional` | recurring family calls, low-priority items | chunk |
 | `Tasks` | daily structure and recurring habits (`给仙人掌浇水`, mindfulness) | chunk |
 | `Meeting` | lab meetings, talks, **appointments — visa, doctor, dentist** | chunk · excluded |
@@ -88,7 +88,7 @@ The ten imported calendars are frozen copies (~9,120 events, colours preserved):
 | a specific date | that date ±2 days, in case he misremembered |
 | nothing | next 90 days; if empty, extend 30 days back |
 
-For anything recurring, the window only needs to reach the next instance — don't sweep a year.
+For anything recurring, the window only needs to reach the next instance — don't sweep a year. (A birthday's next instance can be a year away; see [Birthdays](#birthdays).)
 
 ## Timestamps — the one that's easy to get backwards
 
@@ -136,6 +136,27 @@ Every write starts as a search. Run the recipe above over the target date ±2 da
 ### Gaps in the announcement
 
 Sources routinely omit an end time, list a room as TBA, or carry a stale semester or a typo'd date — check the weekday of every date you're given against the day of week the series actually meets. Fill the gap with the most plausible value, write the assumption into the event description, and flag it in your reply. Don't block on it, and don't silently guess.
+
+### Birthdays
+
+A birthday is the one new event that does **not** go on the primary. He keeps them on `Really Important Tasks`, so they sit among the things he mustn't miss. The create call is this, field for field (Mechanics still applies: `notificationLevel: NONE`, no attendees):
+
+| Field | Value |
+|---|---|
+| calendar | `Really Important Tasks` (id from `list_calendars`) |
+| `summary` | `<Name>’s birthday`, with the curly `’` (U+2019) his own titles use, not `'`. A name he writes in Chinese, or a family term, becomes `<X>生日` with no space (`爷爷奶奶生日`). Spell the name exactly as he gave it. |
+| dates | `allDay: true`, `startTime` = the next occurrence on or after today as a plain date (`2027-01-09`), `endTime` = the day after (`2027-01-10`), no `timeZone` |
+| `recurrenceData` | `["RRULE:FREQ=YEARLY"]`, nothing more — the start date carries the month and day |
+| `availability` | `AVAILABILITY_FREE` — set it explicitly; the API defaults to busy |
+| `colorId` | unset (calendar colour) |
+| reminders | `useDefaultReminders: true`, no overrides |
+| `description` | omitted, except for what he tells you about the person — the group they belong to when he names one (`(psych cohort)`), a birth year (`Born 1997.`) — and the lunar date on lunar one-offs (`农历三月初八`). The title never carries these. The source line from Mechanics doesn't apply — the birthday itself is the record. |
+
+After creating, `get_event` the result and confirm `start.date` is the birthday and `transparency` is `transparent`; all-day dates are where time-zone conversion quietly shifts a day.
+
+**The duplicate check is by name, not by date.** For a yearly event, reaching the next instance means sweeping every calendar over the next 12 months; do it once — one sweep covers a whole batch and the ±2-day check — collect every title containing `birthday`, `生日` or `bday`, and check each name against that list in both scripts and forms (`Xiaoyu` / `小雨`, `外婆` / grandma). A name that already has a birthday is an Ask if the date differs, and nothing to do if it matches and repeats yearly. A question about one name doesn't hold up the rest of the batch. Every existing birthday follows the table (the last three exceptions were brought in line on 2026-10-01, at his request). Moving one between calendars means re-creating it with its original start date, so past years still show, then deleting the old copy.
+
+**Dates a yearly rule can't hold — ask before writing.** A 29 February birthday under `FREQ=YEARLY` silently appears only in leap years: ask whether he wants 28 Feb or 1 Mar in the other years (28 Feb: `RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1`, the last day of February, starting from the next 28 Feb; 1 Mar: a plain yearly event on 1 Mar; either way, list the next two instances after creating to confirm). Its duplicate sweep has to reach the next 29 Feb, which can be up to four years out. A lunar date (农历, common for family) can't recur in Google Calendar at all: ask whether to use their Gregorian birth date (he supplies it) as a normal yearly event, or add the next five years' Gregorian dates as one-off events with the rest of the table unchanged — converted with Python's `lunardate` (`pip install lunardate`; `LunarDate(y, m, d).to_solar_date()`), never by hand. A date he doesn't mark 农历 is solar; say so in the reply rather than asking. So is a numeric date whose order is clear (`6/30`, `8.8`); one that reads two ways (`5/6`) is a question.
 
 ## Reporting back
 
