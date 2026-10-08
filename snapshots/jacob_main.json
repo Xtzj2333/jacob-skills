@@ -2,7 +2,7 @@
   "snapshot_version": "0.8.1",
   "owner": "jacob",
   "machine_id": "main",
-  "generated_at": "2026-10-07T23:59:31Z",
+  "generated_at": "2026-10-08T00:01:23Z",
   "platform": "darwin",
   "claude_version": "2.1.293 (Claude Code)",
   "environment": {
@@ -1640,11 +1640,11 @@
         "sync-cowork-skill@jacob-skills": [
           {
             "scope": "user",
-            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/sync-cowork-skill/395d399c72c2",
-            "version": "395d399c72c2",
+            "installPath": "${HOME}/.claude/plugins/cache/jacob-skills/sync-cowork-skill/3aaf3e0cc24b",
+            "version": "3aaf3e0cc24b",
             "installedAt": "2026-05-09T14:08:59.146Z",
-            "lastUpdated": "2026-08-15T23:54:27.898Z",
-            "gitCommitSha": "395d399c72c22e087ad8b4a5a77b4dde60b725c7"
+            "lastUpdated": "2026-10-08T00:01:22.382Z",
+            "gitCommitSha": "3aaf3e0cc24b0905a5cf3f3201b16a7047c4a90a"
           }
         ],
         "frontend-design@claude-plugins-official": [
@@ -1729,7 +1729,7 @@
       }
     },
     "external_clis": {
-      "captured_at": "2026-10-07T23:59:30Z",
+      "captured_at": "2026-10-08T00:01:22Z",
       "uv_tool_list": "\u001b[1mmcp-youtube-transcript v0.3.5\u001b[0m\n- mcp-youtube-transcript\n",
       "brew_leaves": "biber\ncoreutils\nffmpeg\ngh\ngit\ngit-lfs\nlibrsvg\nmosh\nnode\npandoc\nperl\npoppler\npython@3.11\nrclone\nwdiff\n",
       "notes": []
