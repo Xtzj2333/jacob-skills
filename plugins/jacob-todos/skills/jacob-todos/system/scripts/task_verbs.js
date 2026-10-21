@@ -112,7 +112,28 @@ function done(taskId) {
   return { id: taskId, status: 'done', last_status_change: task.last_status_change };
 }
 
-module.exports = { cancel, snooze, bumpRollover, done, today, loadTasks, loadState };
+const WORK_STATUSES = ['not_started', 'blocked', 'in_progress', 'completed'];
+function setStatus(taskId, workStatus) {
+  // Sets the Google-Tasks-style lifecycle state. "completed" also closes the
+  // task (Completed = done). Idempotent — safe if the task is already done.
+  if (!WORK_STATUSES.includes(workStatus)) {
+    throw new Error(`setStatus: invalid status "${workStatus}" (use ${WORK_STATUSES.join(' | ')})`);
+  }
+  const tasks = loadTasks();
+  const { task } = findTask(tasks, taskId);
+  task.work_status = workStatus;
+  task.last_status_change = today();
+  if (workStatus === 'completed') {
+    task.status = 'done';
+  } else if (task.status === 'done') {
+    // Re-opening a done task by moving it off "completed".
+    task.status = 'open';
+  }
+  saveTasks(tasks);
+  return { id: taskId, work_status: workStatus, status: task.status, last_status_change: task.last_status_change };
+}
+
+module.exports = { cancel, snooze, bumpRollover, done, setStatus, today, loadTasks, loadState };
 
 if (require.main === module) {
   const [verb, taskId, ...rest] = process.argv.slice(2);
@@ -135,7 +156,8 @@ if (require.main === module) {
       }
       case 'bump-rollover': result = bumpRollover(taskId); break;
       case 'done':          result = done(taskId); break;
-      default: throw new Error(`unknown verb: ${verb} (use cancel | snooze | bump-rollover | done)`);
+      case 'status':        result = setStatus(taskId, rest[0]); break;
+      default: throw new Error(`unknown verb: ${verb} (use cancel | snooze | bump-rollover | done | status)`);
     }
     console.log(JSON.stringify(result, null, 2));
   } catch (e) {
