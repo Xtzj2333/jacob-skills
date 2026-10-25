@@ -1,0 +1,19 @@
+[
+ {"name": "Maya Lindqvist", "phd_year": 2016, "advisers": ["Helen Park"],
+  "jobs": [{"years": "2016-23", "title": "Assistant Professor of Psychology", "employer": "University of Toronto", "note": "promotion 2023"}]},
+ {"name": "Daniel Osei", "phd_year": 2019, "advisers": ["Helen Park", "Marcus Webb"],
+  "adviser_note": "Marcus was committee member / mentor",
+  "jobs": [
+   {"years": "2019-21", "title": "Postdoctoral Research Fellow", "employer": "Northwestern University", "note": ""},
+   {"years": "2021-22", "title": "Senior Research Associate", "employer": "Northwestern University", "note": ""},
+   {"years": "2022-26", "title": "Assistant Professor of Psychological & Brain Sciences", "employer": "Washington University in St. Louis", "note": ""},
+   {"years": "2026-", "title": "Associate Professor (with tenure)", "employer": "Washington University in St. Louis", "note": ""}]},
+ {"name": "Priya Raman", "phd_year": 2018, "advisers": ["Marcus Webb"],
+  "jobs": [
+   {"years": "2018-21", "title": "Provost's Postdoctoral Fellow in Marketing", "employer": "NYU Stern School of Business", "note": ""},
+   {"years": "2021-", "title": "Assistant Professor of Marketing", "employer": "Olin Business School, Washington University in St. Louis", "note": ""}]},
+ {"name": "Tomas Herrera", "phd_year": 2022, "advisers": ["Ruth Adler"],
+  "empty": "[2022-] No placement found publicly (checked Oct 2026)"},
+ {"name": "Ana Ruiz", "phd_year": 2026, "advisers": [], "committee": ["Jeff Moreau", "Jeff Nakamura", "Susan Ortiz"],
+  "empty": "[2026-] No position found yet (defended May 2026; checked Oct 2026)"}
+]

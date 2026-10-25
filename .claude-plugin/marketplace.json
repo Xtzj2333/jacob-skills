@@ -124,6 +124,11 @@
       "name": "opportunity-radar",
       "source": "./plugins/opportunity-radar",
       "description": "Use when someone wants a recurring automated sweep that finds opportunities for them — funding, fellowships, training programmes, internships, jobs, application deadlines — and delivers a digest to Slack or email on a schedule. Also when they say their radar missed something, want to change what it looks for, want to know whether it is still running, or want it paused. Triggers on \"set up an opportunity radar\", \"weekly digest of funding/internships\", \"it missed X\", \"why didn't it find\", \"is my radar still working\"."
+    },
+    {
+      "name": "researching-phd-placements",
+      "source": "./plugins/researching-phd-placements",
+      "description": "Use when Jacob asks where a PhD program's, area's, lab's or adviser's graduates ended up (\"do the placements thing for X\", \"PhD grad placements\", a pasted placement, outcomes or degrees-awarded page), whether a program fails or loses PhD students, how one adviser's students compare with others', or wants an existing placement doc or report refreshed, extended or corrected."
     }
   ]
 }
