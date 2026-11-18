@@ -19,7 +19,7 @@ A single JSON file (default name: `<owner>_<machine_id>.json` if a machine_id is
 
 ## Snapshot format version
 
-This skill produces v0.8 snapshots (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older snapshots gracefully (treats missing fields as empty / falls back to older key names). v0.8 added `services` (see below). v0.7 added `skills_cowork`: a visibility-only list of skills found in Cowork's per-session skill directory, each tagged `published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only`. Bodies are NOT captured — collaborators see what exists but personal workflow bodies never leak into the public snapshot.
+This skill produces v0.8 snapshots (format 0.8.2) (see `SNAPSHOT_FORMAT_VERSION` in `scripts/publish_snapshot.py`). The compare side handles older snapshots gracefully (treats missing fields as empty / falls back to older key names). v0.8 added `services` (see below). v0.7 added `skills_cowork`: a visibility-only list of skills found in Cowork's per-session skill directory, each tagged `published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only`. Bodies are NOT captured — collaborators see what exists but personal workflow bodies never leak into the public snapshot.
 
 ## `services` — the part of the environment that isn't inside `~/.claude/`
 
