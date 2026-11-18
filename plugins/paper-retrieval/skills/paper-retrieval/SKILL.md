@@ -7,12 +7,27 @@ description: Use when the user asks to find or download the PDF of a specific na
 
 ## Overview
 
-Layered fallback for acquiring a specific known paper as a PDF. Two operating modes — **synchronous** (user is at their computer and can click once) vs. **asynchronous** (Claude is fetching while user is away). The right tier depends on which mode you're in.
+Acquire and validate the actual paper while minimizing disruption to the user's work. Reuse legitimate institutional access; an anonymous HTTP failure is not evidence that the library lacks access.
 
-Core insights:
-- **Zotero + institutional library is the dominant solution — but it is DORMANT right now.** The UChicago account closed 2026-07-26, killing the library proxy / Find It! / SFX route; Berkeley library access doesn't exist until enrollment (~Fall 2026), at which point Berkeley's proxy becomes the new Tier 0 (see `~/Claude/UChicago account backup/WHERE-THINGS-ARE.md`). The mechanics below are kept because they transfer directly to the Berkeley endpoints. Until then, both SYNC and ASYNC mode start at Tier 1.
-- **OA-API "closed" verdicts are conservative.** Author-archived PDFs on Squarespace/personal sites, Springer SharedIt links, PsyArXiv preprints, and direct `filetype:pdf` Google hits routinely surface papers Unpaywall reports as having no OA copy.
-- **"Open Access" doesn't mean "anonymously fetchable."** Wiley OA papers (e.g. CC-BY-NC) are gated behind Cloudflare even when the license is open. A real browser session — institutional or not — passes the challenge; `curl` does not.
+**Verified 2026-11-01:** Berkeley access is active. UC Library Search → Download PDF → the existing CalNet-authenticated Chrome session retrieved Mallett (2004) and Scannell & Gifford (2017). UChicago access closed 2026-07-26; never use its old proxy or ILL. See `~/Claude/UChicago account backup/WHERE-THINGS-ARE.md` for archived material.
+
+## Batch acquisition through Berkeley (verified 2026-11-14, ~100 papers in one session)
+
+- **One URL per DOI:** `https://libkey.io/libraries/83/<DOI>` (library 83 = Berkeley) shows a "Download PDF" link that resolves through the proxy to the right host. These were observed: Elsevier → a signed `pdf.sciencedirectassets.com` PDF; APA journals → ProQuest (PsycNET itself hung at "Loading…" through the proxy); OUP → a silverchair PDF; AOM and Organization Science → an EBSCO viewer (its Download button opens a dialog with a second Download button). SAGE, T&F, Wiley and Springer PDFs can also be fetched in-page, same-origin, from a proxied article page (`/doi/pdf/<doi>?download=true`, `/doi/pdfdirect/<doi>`, `/content/pdf/<doi>.pdf`).
+- **The trap:** Chrome lets a tab save only the first *script-triggered* download per host. Later `a.click()` saves on blob URLs fail **silently**: the script reports success, but nothing reaches ~/Downloads. This lost ~40 files before it was noticed. The fix is a real user gesture. Inject a fixed-position button whose onclick saves the prefetched blob, then click it with the computer tool. On ProQuest, pin its own "Download PDF" button to a fixed spot and real-click it. If a tab is already in the blocked state, open a fresh tab. Do not change Chrome's automatic-download permission. **Always `ls ~/Downloads` after each batch** rather than trusting the script's "saved".
+- Move every file out of ~/Downloads immediately (rename by key), validate magic bytes, page count and title, and OCR image-only scans (`pdftoppm -r 300` + `tesseract`) so quotes can be verified.
+
+## Minimize foreground interruptions
+
+- Do not automatically open downloaded PDFs, activate Chrome, or switch the user's active tab to demonstrate success. Validate files locally; show a batch index or requested paper only when useful to the user.
+- Prefer a verified public PDF download, existing local/Zotero attachment, or a documented browser download-to-file operation that reuses the authenticated session. Keep research in the user's requested window/group and reuse research tabs; do not navigate their unrelated working tabs.
+- Publisher and library links may open foreground tabs (`target=_blank`), and native Save dialogs can take focus. When supported, read the observed link and navigate an existing background research tab instead of clicking a new-window link. Verify the current tool's behavior; do not assume a method stays in the background.
+- In Codex's browser API, a locator's `downloadMedia` or `waitForEvent("download")` followed by its returned path may avoid the PDF viewer and Save dialog. Use only currently documented APIs. These are candidates, not a verified universal authenticated-download solution: a ScienceDirect `downloadMedia` attempt timed out on 2026-11-01. Inspect browser/files after a timeout before retrying; repeated attempts can open duplicate tabs or dialogs. Ensure the outer call timeout exceeds the bounded download timeout.
+- If the authenticated PDF only saves through the viewer, use that fallback and complete Save yourself, then verify the file. On this Mac, Return did not complete one native Save dialog; clicking its explicit Save button did. Derive controls from fresh UI state. A necessary foreground step is acceptable; batch such steps and give a brief heads-up rather than repeatedly interrupting.
+- Do not export cookies, change global download preferences, or weaken browser protections merely to avoid focus changes. Reuse the signed-in browser. A new CalNet/MFA prompt is a specific access step to hand off when required, not proof of missing coverage.
+- Record the difference between public download, authenticated browser save, readable online full text, and unavailable full text. “Downloaded” and “read” are separate states. Never call a paper inaccessible solely because anonymous curl failed or a browser automation method timed out.
+
+OA discovery APIs are conservative: continue to author sites and repositories after a “closed” verdict. Conversely, an OA license does not guarantee that an anonymous downloader can pass a publisher's bot protection.
 
 ## When to use
 
@@ -27,35 +42,17 @@ Core insights:
 
 ## Operating modes
 
-**SYNC (user present):** Normally Tier 0 (Zotero + institutional library) first — one click; ~90% success rate; bypasses bot-detection. **While Tier 0 is dormant (no institutional access between UChicago closure and Berkeley enrollment), start at Tier 1 even in SYNC mode.**
-
-**ASYNC (user absent):** Skip Tier 0 — it requires user click. Start at Tier 1 (paper-search MCP), proceed through Tiers 2-6. If all fail, surface a user-action recommendation (Tier 7).
+Use the least disruptive working route, whether the user is present or absent. Existing authenticated library access can be used autonomously; ask the user only for a concrete sign-in/MFA step the agent cannot complete. Public routes remain useful for background acquisition.
 
 ## Decision tree
 
-A "valid PDF" means: HTTP 200, `file <path>` reports `PDF document`, magic bytes start with `%PDF-`, size ≥50 KB, title/author grep matches.
+A valid PDF has PDF magic bytes, opens in a PDF parser, and matches the requested title, authors, and article/version. File size alone is not decisive; short legitimate papers may be below 50 KB. A success HTTP status alone is insufficient.
 
-### Tier 0 — Zotero + institutional library (SYNC mode only — **DORMANT until Berkeley enrollment, ~Fall 2026**)
+### Tier 0 — Existing local copy / Berkeley library
 
-The UChicago endpoints below died with the account closure (2026-07-26): `sfx.lib.uchicago.edu`, `www.lib.uchicago.edu` search, and `proxy.uchicago.edu` all require the dead SSO. **Do not attempt them.** When Berkeley access arrives, swap in Berkeley's equivalents (UC Library Search / UC eLinks-successor + `berkeley.edu` EZproxy) — the click flow is identical. Historical UChicago recipe, kept for transfer:
-```
-https://sfx.lib.uchicago.edu/sfx_local?atitle=<URL-encoded title>&anlast=<lastname>&date=<year>   # DEAD
-```
+Search relevant local reference folders or Zotero first. Identify the attachment by bibliographic identity rather than taking the newest PDF in storage.
 
-User click flow (as it worked at UChicago, and will again at Berkeley):
-1. Library "Find It!"-style page → click the publisher link (Wiley / Springer / Elsevier / etc.).
-2. Lands on co-branded publisher page (e.g. "Wiley Online Library + <University> Library").
-3. Click the Zotero Connector "Z" icon → choose the publisher-specific translator (e.g. "Save to Zotero (Wiley Online Library)").
-4. Zotero saves citation + Snapshot + Full Text PDF to the chosen collection.
-
-Verification (Claude side, autonomous): Zotero exposes a local API at `http://localhost:23119/api/` (must be enabled in Settings → Advanced → "Allow other applications to communicate with Zotero"). The `zotero-mcp` server (`github.com/54yyyu/zotero-mcp`) wraps this. Use it to confirm an item appears in the user's library after a save.
-
-After Zotero save, copy the PDF into the project's reference folder:
-```bash
-# Find newest PDF in Zotero storage
-NEW_PDF=$(find "$HOME/Zotero/storage" -mtime -1 -name "*.pdf" -type f | head -1)
-cp "$NEW_PDF" "<project>/references_deepening (claude)/pdfs/refNN_<canonical_name>.pdf"
-```
+For library acquisition, use https://www.lib.berkeley.edu/ → UC Library Search → title/author search → the matching record's **Download PDF** or publisher full-text link. Follow the actual observed link (often LibKey) rather than inventing proxy URL variants. Reuse the existing signed-in Chrome session; a separate command-line request does not inherit it. Verify institutional full-text access on the publisher page, save the actual article, and validate it locally. If Zotero Connector is available, it is an alternative acquisition route; verify the specific item's PDF attachment before copying it into the project.
 
 ### Tier 1 — paper-search MCP (ASYNC default starting point)
 
@@ -70,7 +67,7 @@ uv run --directory /Users/jacobzhang/paper-search-mcp paper-search download <sou
 ```bash
 curl https://api.unpaywall.org/v2/<DOI>?email=jacobqqqzxt@gmail.com
 ```
-If `is_oa: true`, follow `best_oa_location.url_for_pdf`. **DO NOT stop on `is_oa: false`** — keep going. Also: a `true` from Unpaywall doesn't guarantee anonymous fetch — Wiley OA URLs return Cloudflare 403 to `curl`. If the URL is `*.onlinelibrary.wiley.com/doi/pdfdirect/...` and you're in ASYNC mode, surface to user (or skip to Tier 3+).
+If `is_oa: true`, follow `best_oa_location.url_for_pdf`. **DO NOT stop on `is_oa: false`** — keep going. Also: a `true` from Unpaywall doesn't guarantee anonymous fetch — Wiley OA URLs return Cloudflare 403 to `curl`. If anonymous retrieval fails, try the existing authenticated browser or continue through legitimate author/repository routes.
 
 ### Tier 3 — PMC / EuropePMC direct
 
@@ -102,11 +99,7 @@ Note the file may be the preprint version with minor textual differences from th
 
 ### Tier 7 — Surface to user (do NOT bypass auth)
 
-If Tiers 1-6 miss, do not attempt to bypass authentication. Recommend:
-- Polite email to the corresponding author (the main route while no institutional access exists)
-- A colleague with live institutional access (e.g. a lab collaborator) pulling it via their library
-- Once Berkeley access exists (~Fall 2026): Berkeley library proxy, LibKey Nomad at the publisher page, or ILL via the Berkeley library
-- (The old UChicago routes — `proxy.uchicago.edu`, UChicago ILL — are dead; never suggest them)
+If public routes fail, try the authenticated Berkeley route before requesting help. Report the exact remaining obstacle (sign-in, coverage, bot challenge, failed download operation, or missing full text) and the exact title/DOI. Offer a direct PDF link when verified, plus the library record when needed. Berkeley ILL or an author request are fallbacks; do not send requests to others without user authorization.
 
 **Never** use Sci-Hub, Library Genesis, or other unauthorized mirrors. Recommend legitimate routes only.
 
@@ -116,49 +109,17 @@ If Tiers 1-6 miss, do not attempt to bypass authentication. Recommend:
 - Folder: `references_deepening (claude)/pdfs/`
 - Filename: `refNN_FirstauthorLastnameYYYY_VenueOrSource.pdf` (e.g., `ref04_KneerHaybron2024_Nous_HappinessWellBeing.pdf`)
 - After download, run `pdftotext -layout "<dest>" "<dest>.txt"` for downstream grep
-- After download, `open "<dest>"` so the user can verify visually
+- Validate silently; do not open each downloaded PDF. Provide a readable index with local PDF links when reporting results.
 
 **Other projects:** infer from existing reference-PDF folders; if none, ask the user.
 
-## Validation snippet
+## Validation and reading audit
 
-Three checks, in order. Any failure → delete the file and proceed to the next tier.
+Check PDF magic/parseability, then extract text (`pdftotext -layout`) and verify the title, authors, DOI where present, page count, and version. Inspect scanned pages visually if text extraction fails. Do not treat an author surname match alone as sufficient. Semantic Scholar and author-site links can return a different paper or an annual report.
 
-```bash
-DEST="<path>"
-EXPECTED_TITLE="<distinctive phrase from the actual paper title>"
-EXPECTED_AUTHOR="<first-author lastname>"
+Keep failed responses classified separately rather than deleting research records or leaving HTML wrappers labeled as valid PDFs. Record source URL, saved path, version, acquisition status, and reading status. Full-text XML/HTML or publisher view-only access can support reading but must not be counted as a downloaded PDF. Incomplete manuscripts, missing tables/supplements, and selected chapters must be labeled explicitly.
 
-file "$DEST" | grep -q "PDF document" || { echo "NOT A PDF — discard"; rm "$DEST"; exit 1; }
-
-SIZE=$(stat -f%z "$DEST")
-[ "$SIZE" -gt 50000 ] || { echo "Suspiciously small (<50KB)"; rm "$DEST"; exit 1; }
-
-pdftotext -layout "$DEST" "${DEST%.pdf}.txt" 2>/dev/null
-grep -q -i "$EXPECTED_TITLE\|$EXPECTED_AUTHOR" "${DEST%.pdf}.txt" || {
-  echo "CONTENT MISMATCH — file is a different paper than requested"; exit 1; }
-```
-
-The third check is critical. **Semantic Scholar's `pdfs.semanticscholar.org` URLs occasionally serve a different paper than the one whose abstract page links to them** — observed 2026-04-30 when a Kennedy 2022 chapter request returned a Rathje 2024 PNAS paper. Always grep before declaring success.
-
-## Common mistakes
-
-| Mistake | Fix |
-|---|---|
-| In SYNC mode (with live institutional access), going to Tier 1 first instead of Tier 0 | If user is present and Tier 0 is live, Zotero+library is one click. While Tier 0 is dormant (mid-2026 → Berkeley enrollment), Tier 1 first is correct. |
-| Trusting Unpaywall's `is_oa: false` and stopping | "Closed" ≠ "unfindable." Run Tier 4 next. |
-| Trusting Unpaywall's `is_oa: true` and assuming `curl` will work | Wiley OA → Cloudflare 403 to anonymous curl. Need real browser or institutional route. |
-| Saving an HTML paywall wrapper as `.pdf` | `file <path>` and size-check after every download. |
-| Saving to wrong folder | Bottom-Up canonical path is `references_deepening (claude)/pdfs/`, not `manuscript_repo_tony/`. |
-| Using Sci-Hub / LibGen | Don't. Recommend Tier 7 routes. |
-| Auto-renaming files marked `(source)` | The `(source)` rule applies — request "extract here" permission first. |
-
-## Red flags
-
-- "I'll just trust the API verdict" — go to Tier 4.
-- "The publisher page returned 200, must be the PDF" — check `file` output and magic bytes.
-- "Wiley says it's OA, I'll just curl it" — Cloudflare blocks anonymous curl. Use Tier 0 or surface to user.
-- "I'll grab it from Sci-Hub real quick" — no. Recommend a legitimate route.
+For a literature review, read the actual main text, methods, results, tables, limitations, and relevant references before marking a paper read. Record page/section support for claims and distinguish reused datasets from independent replications.
 
 ## Pilot results (2026-04-30, refs 1–10 + 38, 45 — UChicago era, before the account closed)
 
@@ -170,4 +131,4 @@ The third check is critical. **Semantic Scholar's `pdfs.semanticscholar.org` URL
 | Tier 6 — OSF preprint | 1 | Kennedy 2022 Guilford handbook chapter (book chapters not in journal catalogs) |
 | Bot-detection failures w/o Tier 0 | 3 | Wiley OA papers — Cloudflare 403 blocks curl; Tier 0 bypasses cleanly |
 
-**Headline lesson:** Tier 0 is the default for SYNC mode *when institutional access is live*. Tiers 1-6 remain the autonomous (ASYNC) path — and the everything path while Tier 0 is dormant; Tier 4 (Google filetype:pdf) and Tier 6 (OSF preprint) cover the cases Zotero can't.
+**Headline lesson:** Tier 0 is the default for SYNC mode *when institutional access is live*. Public routes and existing authenticated library access can both be autonomous; Tier 4 (Google filetype:pdf) and Tier 6 (OSF preprint) cover the cases Zotero can't.
