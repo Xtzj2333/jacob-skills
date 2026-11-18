@@ -7,6 +7,8 @@ description: ALWAYS invoke this skill when the user asks to search/browse/find a
 
 Search, download, and read academic papers via the `paper-search` CLI.
 
+For acquisition after discovery, follow `../paper-retrieval/SKILL.md`, including its foreground-minimization and validation guidance. Do not open each saved PDF or switch the user’s working tab; validate locally and report a batch index. Reuse existing Berkeley authentication when public downloads fail, and distinguish saved, fully read, partially read, and unavailable sources.
+
 ## CLI Usage
 
 All commands run via:
