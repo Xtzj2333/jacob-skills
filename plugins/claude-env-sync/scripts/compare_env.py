@@ -176,6 +176,38 @@ ANTHROPIC_COWORK_BUILTIN_SKILLS = {
     "setup-cowork",
 }
 COWORK_SKILLS_BASE_REL = Path("Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin")
+COWORK_SESSIONS_REL = Path("Library/Application Support/Claude/local-agent-mode-sessions")
+COWORK_UPLOADS_MARKETPLACE = "My Uploads"
+
+
+def iter_cowork_skill_dirs(home: Path):
+    """Mirror of publish_snapshot.iter_cowork_skill_dirs: legacy skills-plugin/
+    first, then account uploads synced as rpm/plugin_<id>/skills/<name>/ (Claude
+    Desktop ~2026-11+), filtered to rpm/manifest.json's "My Uploads" entries."""
+    legacy = home / COWORK_SKILLS_BASE_REL
+    if legacy.is_dir():
+        for skill_md in sorted(legacy.glob("*/*/skills/*/SKILL.md")):
+            yield skill_md.parent
+    sessions = home / COWORK_SESSIONS_REL
+    if not sessions.is_dir():
+        return
+    for rpm in sorted(sessions.glob("*/*/rpm")):
+        if not rpm.is_dir() or rpm.parent.parent.name == "skills-plugin":
+            continue
+        uploads = None
+        try:
+            manifest = json.loads((rpm / "manifest.json").read_text())
+            uploads = {
+                p.get("id") for p in manifest.get("plugins", [])
+                if p.get("marketplaceName") == COWORK_UPLOADS_MARKETPLACE
+            }
+        except Exception:
+            pass
+        for plugin in sorted(rpm.glob("plugin_*")):
+            if uploads is not None and plugin.name not in uploads:
+                continue
+            for skill_md in sorted(plugin.glob("skills/*/SKILL.md")):
+                yield skill_md.parent
 
 
 def list_marketplace_available_skills_local(home: Path) -> dict:
@@ -208,49 +240,33 @@ def list_marketplace_available_skills_local(home: Path) -> dict:
 def list_cowork_skills_local(home: Path, plugin_skills_by_name: dict) -> list[dict]:
     """Mirror of publish_snapshot.list_cowork_skills — same shape so self-compare
     matches. Visibility-only: name + description + published_via."""
-    base = home / COWORK_SKILLS_BASE_REL
-    if not base.is_dir():
-        return []
     by_name: dict = {}
-    for session_dir in sorted(base.iterdir()):
-        if not session_dir.is_dir():
+    for entry in iter_cowork_skill_dirs(home):
+        skill_md = entry / "SKILL.md"
+        if entry.name in by_name:
             continue
-        for inner in sorted(session_dir.iterdir()):
-            if not inner.is_dir():
-                continue
-            skills_dir = inner / "skills"
-            if not skills_dir.is_dir():
-                continue
-            for entry in sorted(skills_dir.iterdir()):
-                if not entry.is_dir():
-                    continue
-                skill_md = entry / "SKILL.md"
-                if not skill_md.exists():
-                    continue
-                if entry.name in by_name:
-                    continue
-                try:
-                    text = skill_md.read_text(errors="replace")
-                except Exception:
-                    continue
-                description = ""
-                m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
-                if m:
-                    fm = m.group(1)
-                    d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
-                    if d:
-                        description = d.group(1).strip().strip('"').strip("'")
-                if entry.name in ANTHROPIC_COWORK_BUILTIN_SKILLS:
-                    published_via = "anthropic-builtin"
-                elif entry.name in plugin_skills_by_name:
-                    published_via = plugin_skills_by_name[entry.name]
-                else:
-                    published_via = "cowork-only"
-                by_name[entry.name] = {
-                    "name": entry.name,
-                    "description": description[:300],
-                    "published_via": published_via,
-                }
+        try:
+            text = skill_md.read_text(errors="replace")
+        except Exception:
+            continue
+        description = ""
+        m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
+        if m:
+            fm = m.group(1)
+            d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
+            if d:
+                description = d.group(1).strip().strip('"').strip("'")
+        if entry.name in ANTHROPIC_COWORK_BUILTIN_SKILLS:
+            published_via = "anthropic-builtin"
+        elif entry.name in plugin_skills_by_name:
+            published_via = plugin_skills_by_name[entry.name]
+        else:
+            published_via = "cowork-only"
+        by_name[entry.name] = {
+            "name": entry.name,
+            "description": description[:300],
+            "published_via": published_via,
+        }
     return sorted(by_name.values(), key=lambda s: s["name"])
 
 

@@ -2,6 +2,14 @@
 """
 publish_snapshot.py — capture a redacted snapshot of a Claude Code environment.
 
+v0.8.2 (fix): Cowork-session skills are read from BOTH Cowork locations. Claude
+  Desktop (~2026-11) stopped extracting the user's own account skills into
+  skills-plugin/ and now syncs them as account plugins under
+  local-agent-mode-sessions/<account>/<org>/rpm/plugin_<id>/skills/ ("My Uploads"
+  in rpm/manifest.json). v0.8.1 only looked in skills-plugin/, so a publish after
+  the migration silently dropped every user-authored Cowork skill from
+  skills_cowork — reading as "no longer in Cowork" when nothing had changed.
+
 v0.8 adds (on top of v0.7):
   - SERVICES: background services on this machine that depend on Claude Code
     (macOS launchd user agents). The snapshot used to describe everything inside
@@ -80,7 +88,7 @@ from pathlib import Path
 # plugins/claude-env-sync/.claude-plugin/plugin.json's "version" field — bump
 # both whenever the publisher gains or changes a capture. The comparer reads
 # this back and warns if its own SCRIPT_VERSION is older.
-SNAPSHOT_FORMAT_VERSION = "0.8.1"
+SNAPSHOT_FORMAT_VERSION = "0.8.2"
 
 # Cap per-file body capture at ~150KB to keep snapshots tractable; warn if exceeded.
 SKILL_BUNDLE_FILE_MAX_BYTES = 150 * 1024
@@ -122,6 +130,51 @@ ANTHROPIC_COWORK_BUILTIN_SKILLS = {
 # session UUIDs that rotate per install — we glob over them so the scan keeps
 # working across Cowork reinstalls.
 COWORK_SKILLS_BASE_REL = Path("Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin")
+# Since Claude Desktop ~2026-11 (seen 2026-11-16 on JZ), skills a user uploaded to
+# their claude.ai account are no longer extracted under skills-plugin/. They arrive
+# as "account plugins" in
+#   local-agent-mode-sessions/<account>/<org>/rpm/plugin_<id>/skills/<name>/SKILL.md
+# listed in rpm/manifest.json under the pseudo-marketplace "My Uploads". The same
+# rpm/ folder also holds marketplace plugins the account installed (those carry a
+# real marketplaceName); only the uploads are what skills-plugin/ used to hold.
+COWORK_SESSIONS_REL = Path("Library/Application Support/Claude/local-agent-mode-sessions")
+COWORK_UPLOADS_MARKETPLACE = "My Uploads"
+
+
+def iter_cowork_skill_dirs(home: Path):
+    """Yield every Cowork skill folder that holds a SKILL.md, legacy location first.
+
+    1. skills-plugin/<session>/<inner>/skills/<name>/  (Anthropic built-ins; and,
+       before the ~2026-11 migration, the user's own account skills)
+    2. <account>/<org>/rpm/plugin_<id>/skills/<name>/  (account uploads, i.e. the
+       user's own skills after the migration). A plugin is included when
+       rpm/manifest.json lists it under COWORK_UPLOADS_MARKETPLACE, or when there
+       is no readable manifest to tell uploads from marketplace installs.
+    """
+    legacy = home / COWORK_SKILLS_BASE_REL
+    if legacy.is_dir():
+        for skill_md in sorted(legacy.glob("*/*/skills/*/SKILL.md")):
+            yield skill_md.parent
+    sessions = home / COWORK_SESSIONS_REL
+    if not sessions.is_dir():
+        return
+    for rpm in sorted(sessions.glob("*/*/rpm")):
+        if not rpm.is_dir() or rpm.parent.parent.name == "skills-plugin":
+            continue
+        uploads = None  # None = no manifest; include every plugin
+        try:
+            manifest = json.loads((rpm / "manifest.json").read_text())
+            uploads = {
+                p.get("id") for p in manifest.get("plugins", [])
+                if p.get("marketplaceName") == COWORK_UPLOADS_MARKETPLACE
+            }
+        except Exception:
+            pass
+        for plugin in sorted(rpm.glob("plugin_*")):
+            if uploads is not None and plugin.name not in uploads:
+                continue
+            for skill_md in sorted(plugin.glob("skills/*/SKILL.md")):
+                yield skill_md.parent
 
 
 def detect_upstream(skill_dir: Path) -> dict:
@@ -487,51 +540,35 @@ def list_cowork_skills(home: Path, plugin_skills_by_name: dict, stats: dict) -> 
     Bodies are intentionally NOT bundled — personal Cowork workflows (lab-meeting
     templates, todo skills, etc.) shouldn't leak into the public snapshot.
     """
-    base = home / COWORK_SKILLS_BASE_REL
-    if not base.is_dir():
-        return []
     by_name: dict = {}
-    for session_dir in sorted(base.iterdir()):
-        if not session_dir.is_dir():
+    for entry in iter_cowork_skill_dirs(home):
+        skill_md = entry / "SKILL.md"
+        if entry.name in by_name:
+            continue  # first location/session wins on dedup
+        try:
+            text = skill_md.read_text(errors="replace")
+        except Exception:
             continue
-        for inner in sorted(session_dir.iterdir()):
-            if not inner.is_dir():
-                continue
-            skills_dir = inner / "skills"
-            if not skills_dir.is_dir():
-                continue
-            for entry in sorted(skills_dir.iterdir()):
-                if not entry.is_dir():
-                    continue
-                skill_md = entry / "SKILL.md"
-                if not skill_md.exists():
-                    continue
-                if entry.name in by_name:
-                    continue  # first session wins on dedup
-                try:
-                    text = skill_md.read_text(errors="replace")
-                except Exception:
-                    continue
-                description = ""
-                m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
-                if m:
-                    fm = m.group(1)
-                    d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
-                    if d:
-                        description = d.group(1).strip().strip('"').strip("'")
-                # User-authored — pass through redactor for emails/keys, then home-normalize.
-                description = normalize_home(redact_string(description, stats), stats)
-                if entry.name in ANTHROPIC_COWORK_BUILTIN_SKILLS:
-                    published_via = "anthropic-builtin"
-                elif entry.name in plugin_skills_by_name:
-                    published_via = plugin_skills_by_name[entry.name]
-                else:
-                    published_via = "cowork-only"
-                by_name[entry.name] = {
-                    "name": entry.name,
-                    "description": description[:300],
-                    "published_via": published_via,
-                }
+        description = ""
+        m = re.search(r"^---\s*\n(.*?)\n---", text, re.DOTALL | re.MULTILINE)
+        if m:
+            fm = m.group(1)
+            d = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
+            if d:
+                description = d.group(1).strip().strip('"').strip("'")
+        # User-authored — pass through redactor for emails/keys, then home-normalize.
+        description = normalize_home(redact_string(description, stats), stats)
+        if entry.name in ANTHROPIC_COWORK_BUILTIN_SKILLS:
+            published_via = "anthropic-builtin"
+        elif entry.name in plugin_skills_by_name:
+            published_via = plugin_skills_by_name[entry.name]
+        else:
+            published_via = "cowork-only"
+        by_name[entry.name] = {
+            "name": entry.name,
+            "description": description[:300],
+            "published_via": published_via,
+        }
     return sorted(by_name.values(), key=lambda s: s["name"])
 
 
@@ -1034,7 +1071,7 @@ def build_snapshot(owner: str, machine_id: str | None) -> tuple[dict, dict]:
             "skills_user": "~/.claude/skills/<name>/SKILL.md — names + descriptions (always captured)",
             "skills_user_bodies": "~/.claude/skills/<name>/ — full SKILL.md text + bundled text files; binary or oversized files listed under 'skipped'",
             "skills_plugin": "~/.claude/plugins/cache/<mp>/<plugin>/<ver>/skills/<name>/SKILL.md",
-            "skills_cowork": "~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<session>/<inner>/skills/<name>/SKILL.md — Cowork session skills, visibility-only (no bodies). Each entry tagged published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only.",
+            "skills_cowork": "~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<session>/<inner>/skills/<name>/SKILL.md (built-ins; account skills before ~2026-11) + local-agent-mode-sessions/<account>/<org>/rpm/plugin_<id>/skills/<name>/SKILL.md for plugins rpm/manifest.json lists under 'My Uploads' (account skills since ~2026-11) — Cowork session skills, visibility-only (no bodies). Each entry tagged published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only.",
             "commands": "~/.claude/commands/<name>.md (frontmatter + body)",
             "agents": "~/.claude/agents/<name>.md",
             "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-17 — `claude-env-sync` 0.8.2: Cowork skills are found again after Desktop moved them
+
+**TL;DR:** `claude plugin update claude-env-sync@jacob-skills`. Only matters if you use Cowork (Claude Desktop) skills; nothing to redo otherwise.
+
+**What was wrong.** Claude Desktop (~mid-November 2026) stopped extracting the skills you uploaded to your claude.ai
+account into `local-agent-mode-sessions/skills-plugin/…/skills/`. It now syncs them as *account plugins* under
+`local-agent-mode-sessions/<account>/<org>/rpm/plugin_<id>/skills/<name>/`, listed in `rpm/manifest.json` under the
+pseudo-marketplace "My Uploads". 0.8.1 only looked in the old folder, so the first publish after Desktop's migration
+dropped every user-authored Cowork skill from `skills_cowork` — which read as "no longer in Cowork" when nothing had
+changed (Jacob's 2026-11-17 snapshot lost `calendar-search`, `jacob-todos`, `oishi-lab-meeting`, `sl` this way).
+
+**What it is now.** Both the publisher and the comparer read both locations: the old one first (Anthropic's built-ins
+still live there), then the "My Uploads" account plugins. Marketplace plugins the account installed (they also sit in
+`rpm/`, with a real marketplace name) are left out, as before. Snapshot format `0.8.2`; no new fields.
+
 ## 2026-09-30 — `chrome-tab` 0.6.0: pages find the project's window
 
 **TL;DR:** `claude plugin update chrome-tab@jacob-skills`. No helper reinstall: the extension didn't change.
