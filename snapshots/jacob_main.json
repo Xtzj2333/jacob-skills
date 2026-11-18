@@ -1,8 +1,8 @@
 {
-  "snapshot_version": "0.8.1",
+  "snapshot_version": "0.8.2",
   "owner": "jacob",
   "machine_id": "main",
-  "generated_at": "2026-11-18T05:51:13Z",
+  "generated_at": "2026-11-18T05:56:25Z",
   "platform": "darwin",
   "claude_version": "2.1.327 (Claude Code)",
   "environment": {
@@ -1571,6 +1571,11 @@
         "published_via": "cowork-only"
       },
       {
+        "name": "calendar-search",
+        "description": "Search Jacob's Google Calendar, and make every change to it — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', AND whenever he as",
+        "published_via": "plugin:calendar-search@jacob-skills"
+      },
+      {
         "name": "chrome-browser",
         "description": "Read this skill before the first step that uses Claude in Chrome, the browser extension whose tools are named mcp__claude-in-chrome__* (also called Chrome, the browser extension, or the external browser) and which acts in the person's real Chrome with their own sign-ins; before those tools are turne",
         "published_via": "cowork-only"
@@ -1616,8 +1621,18 @@
         "published_via": "cowork-only"
       },
       {
+        "name": "jacob-todos",
+        "description": "Manage Jacob's personal to-do system built on Google Calendar + an HTML check-in surface. Use this skill whenever the user mentions tasks, to-dos, weekly consolidation, calendar cleanup, adding or merging tasks, acting on docx comments, bracket tags, inbox.md, checking what's on their plate, the mor",
+        "published_via": "plugin:jacob-todos@jacob-skills"
+      },
+      {
         "name": "morning",
         "description": "Render the user's morning brief as a styled HTML artifact, or set it up as a recurring weekday task. Use only when the user explicitly asks to run, see, or set up their morning brief, or if they invoke /morning by name. A question about their day, schedule, or calendar is not by itself a request for",
+        "published_via": "cowork-only"
+      },
+      {
+        "name": "oishi-lab-meeting",
+        "description": "Everything about the Oishi Lab meeting — when it is, what's on the agenda, the Zoom link, who's presenting, and (only if Jacob is the one sending) drafting the announcement email. Use whenever Jacob mentions the Oishi lab meeting, the Monday lab meeting, Shige's lab meeting, next week's lab meeting,",
         "published_via": "cowork-only"
       },
       {
@@ -1644,6 +1659,11 @@
         "name": "skill-creator",
         "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better t",
         "published_via": "anthropic-builtin"
+      },
+      {
+        "name": "sl",
+        "description": "Continuous improvement loop for all of Jacob's skills. Silently observes every skill session, logs context and inferred lessons, and uses qualitative judgment to decide when accumulated learnings are worth surfacing. ALWAYS invoke this skill when Jacob says 'sl', 'skill learner', 'review learnings',",
+        "published_via": "cowork-only"
       },
       {
         "name": "xlsx",
@@ -1849,7 +1869,7 @@
       }
     },
     "external_clis": {
-      "captured_at": "2026-11-18T05:51:13Z",
+      "captured_at": "2026-11-18T05:56:25Z",
       "uv_tool_list": "mcp-youtube-transcript v0.3.5\n- mcp-youtube-transcript\n",
       "brew_leaves": "biber\ncoreutils\nffmpeg\ngh\ngit\ngit-lfs\nlibrsvg\nmosh\nnode\npandoc\nperl\npoppler\npython@3.11\nrclone\ntesseract\nwdiff\n",
       "notes": []
@@ -1979,7 +1999,7 @@
     "skills_user": "~/.claude/skills/<name>/SKILL.md — names + descriptions (always captured)",
     "skills_user_bodies": "~/.claude/skills/<name>/ — full SKILL.md text + bundled text files; binary or oversized files listed under 'skipped'",
     "skills_plugin": "~/.claude/plugins/cache/<mp>/<plugin>/<ver>/skills/<name>/SKILL.md",
-    "skills_cowork": "~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<session>/<inner>/skills/<name>/SKILL.md — Cowork session skills, visibility-only (no bodies). Each entry tagged published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only.",
+    "skills_cowork": "~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<session>/<inner>/skills/<name>/SKILL.md (built-ins; account skills before ~2026-11) + local-agent-mode-sessions/<account>/<org>/rpm/plugin_<id>/skills/<name>/SKILL.md for plugins rpm/manifest.json lists under 'My Uploads' (account skills since ~2026-11) — Cowork session skills, visibility-only (no bodies). Each entry tagged published_via: anthropic-builtin | plugin:<p>@<mp> | cowork-only.",
     "commands": "~/.claude/commands/<name>.md (frontmatter + body)",
     "agents": "~/.claude/agents/<name>.md",
     "installed_plugins": "~/.claude/plugins/installed_plugins.json — per-plugin version, gitCommitSha, install path (gives strict version pinning)",
