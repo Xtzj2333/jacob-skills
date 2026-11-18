@@ -2,9 +2,9 @@
   "snapshot_version": "0.8.1",
   "owner": "jacob",
   "machine_id": "main",
-  "generated_at": "2026-11-15T23:28:20Z",
+  "generated_at": "2026-11-18T05:51:13Z",
   "platform": "darwin",
-  "claude_version": "2.1.325 (Claude Code)",
+  "claude_version": "2.1.327 (Claude Code)",
   "environment": {
     "settings_json": {
       "skillListingBudgetFraction": 0.02,
@@ -21,6 +21,7 @@
         ],
         "defaultMode": "auto"
       },
+      "model": "opus",
       "hooks": {
         "PreToolUse": [
           {
@@ -97,7 +98,7 @@
           "effortLevel": "xhigh"
         },
         "claude-fable-5-2": {
-          "effortLevel": "xhigh"
+          "effortLevel": "high"
         }
       },
       "tui": "fullscreen",
@@ -132,8 +133,7 @@
           "**Trusted repo**: The git repository the agent started in (its working directory) and its configured remote(s) — no remotes are configured in this working directory (`${HOME}`), so no repo-specific trust can be established from Repo facts; treat any git operations here as needing confirmation of target repo",
           "**Org-specific CLIs**: None configured — `claude`, `sqlite3`, `brew`, `crontab`, `ioreg`, `launchctl`, `lsof`, `system_profiler`, `open` seen but are generic/personal-Mac tooling, not org-specific"
         ]
-      },
-      "model": "opus"
+      }
     },
     "settings_local_json": {
       "permissions": {
@@ -1374,6 +1374,11 @@
     ],
     "skills_plugin": [
       {
+        "name": "agent-notifications",
+        "description": "Send an Agent Notifications desktop notification when the user requests one, attention is needed, or a meaningful milestone warrants an alert during ongoing work. Discover the notify and notification_status tools before reporting them unavailable.",
+        "source": "plugin:claude-notifications-go@claude-notifications-go"
+      },
+      {
         "name": "claude-md-improver",
         "description": "Audit and improve CLAUDE.md files in repositories. Use when user asks to check, audit, update, improve, or fix CLAUDE.md files. Scans for all CLAUDE.md files, evaluates quality against templates, outputs quality report, then makes targeted updates. Also use when the user mentions \"CLAUDE.md maintena",
         "source": "plugin:claude-md-management@claude-plugins-official"
@@ -1566,11 +1571,6 @@
         "published_via": "cowork-only"
       },
       {
-        "name": "calendar-search",
-        "description": "Search Jacob's Google Calendar, and make every change to it — flights, appointments, doctor visits, classes, office hours, talks, social plans, recurring habits. Use whenever he asks 'is X on my calendar', 'do I have a…', 'when is my…', 'find my…', 'check my cal', 'what time is…', AND whenever he as",
-        "published_via": "plugin:calendar-search@jacob-skills"
-      },
-      {
         "name": "chrome-browser",
         "description": "Read this skill before the first step that uses Claude in Chrome, the browser extension whose tools are named mcp__claude-in-chrome__* (also called Chrome, the browser extension, or the external browser) and which acts in the person's real Chrome with their own sign-ins; before those tools are turne",
         "published_via": "cowork-only"
@@ -1616,18 +1616,8 @@
         "published_via": "cowork-only"
       },
       {
-        "name": "jacob-todos",
-        "description": "Manage Jacob's personal to-do system built on Google Calendar + an HTML check-in surface. Use this skill whenever the user mentions tasks, to-dos, weekly consolidation, calendar cleanup, adding or merging tasks, acting on docx comments, bracket tags, inbox.md, checking what's on their plate, the mor",
-        "published_via": "plugin:jacob-todos@jacob-skills"
-      },
-      {
         "name": "morning",
         "description": "Render the user's morning brief as a styled HTML artifact, or set it up as a recurring weekday task. Use only when the user explicitly asks to run, see, or set up their morning brief, or if they invoke /morning by name. A question about their day, schedule, or calendar is not by itself a request for",
-        "published_via": "cowork-only"
-      },
-      {
-        "name": "oishi-lab-meeting",
-        "description": "Everything about the Oishi Lab meeting — when it is, what's on the agenda, the Zoom link, who's presenting, and (only if Jacob is the one sending) drafting the announcement email. Use whenever Jacob mentions the Oishi lab meeting, the Monday lab meeting, Shige's lab meeting, next week's lab meeting,",
         "published_via": "cowork-only"
       },
       {
@@ -1654,11 +1644,6 @@
         "name": "skill-creator",
         "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better t",
         "published_via": "anthropic-builtin"
-      },
-      {
-        "name": "sl",
-        "description": "Continuous improvement loop for all of Jacob's skills. Silently observes every skill session, logs context and inferred lessons, and uses qualitative judgment to decide when accumulated learnings are worth surfacing. ALWAYS invoke this skill when Jacob says 'sl', 'skill learner', 'review learnings',",
-        "published_via": "cowork-only"
       },
       {
         "name": "xlsx",
@@ -1815,11 +1800,11 @@
         "claude-notifications-go@claude-notifications-go": [
           {
             "scope": "user",
-            "installPath": "${HOME}/.claude/plugins/cache/claude-notifications-go/claude-notifications-go/1.40.1",
-            "version": "1.40.1",
+            "installPath": "${HOME}/.claude/plugins/cache/claude-notifications-go/claude-notifications-go/1.51.4",
+            "version": "1.51.4",
             "installedAt": "2026-05-14T06:08:05.368Z",
-            "lastUpdated": "2026-08-15T23:54:29.559Z",
-            "gitCommitSha": "74b9fba35169e7289aa3d644fb7cace26fa2e52f"
+            "lastUpdated": "2026-11-16T04:45:40.003Z",
+            "gitCommitSha": "ca312b63db68f6a86ef64de2c9a0cf244f59072a"
           }
         ],
         "claude-md-management@claude-plugins-official": [
@@ -1864,7 +1849,7 @@
       }
     },
     "external_clis": {
-      "captured_at": "2026-11-15T23:28:19Z",
+      "captured_at": "2026-11-18T05:51:13Z",
       "uv_tool_list": "mcp-youtube-transcript v0.3.5\n- mcp-youtube-transcript\n",
       "brew_leaves": "biber\ncoreutils\nffmpeg\ngh\ngit\ngit-lfs\nlibrsvg\nmosh\nnode\npandoc\nperl\npoppler\npython@3.11\nrclone\ntesseract\nwdiff\n",
       "notes": []
@@ -1875,7 +1860,7 @@
           "notifications": {
             "desktop": {
               "enabled": true,
-              "sound": true,
+              "sound": false,
               "volume": 1.0,
               "appIcon": "${CLAUDE_PLUGIN_ROOT}/claude_icon.png",
               "clickToFocus": true,
